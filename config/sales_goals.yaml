@@ -1,0 +1,16 @@
+# Roční cíle (kvóty) jednotlivých obchodníků, v Kč.
+# Klíč MUSÍ přesně odpovídat jménu, jak ho vrací HubSpot owner API
+# (to, co dnes vidíš jako název listu).
+#
+# null = cíl zatím není stanovený -> report se pro danou osobu vygeneruje
+# normálně, jen se vynechá graf "tempo k cíli".
+
+owners:
+  Martin: 950000
+  Richard: 1000000
+  Veronika: 800000
+  Mykyta: 380000
+  Olda: 700000
+  Lukáš: null
+  Julie: null
+  Dominika: null

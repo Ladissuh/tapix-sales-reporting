@@ -1,0 +1,36 @@
+# Váhy (pravděpodobnost uzavření) podle stage, používané pro vážený
+# pipeline výpočet. Klíč MUSÍ přesně odpovídat "label" hodnotě dané stage
+# v HubSpot pipeline (to, co vidíš v HubSpotu jako název fáze).
+#
+# Pokud se v datech objeví stage, která tu není uvedená, použije se
+# DEFAULT_PROBABILITY (viz main.py) a do logu se vypíše upozornění -
+# přidej ji sem, ať se to příště nestává.
+
+stages:
+  "Lead Engaged": 0.01
+  "Meeting negotiation / contacted": 0.01
+  "Intro meeting agreed": 0.01
+  "Awaiting confirmation / Not Now": 0.03
+  "Qualify": 0.09
+  "Discover": 0.12
+  "Validate": 0.20
+  "Decide": 0.45
+  "Commit": 0.90
+  "Tech intro": 0.95
+  "Implementation": 0.95
+  "Testing": 0.95
+
+# Pořadí fází v tabulce/reportu (shora dolů).
+stage_order:
+  - "Lead Engaged"
+  - "Meeting negotiation / contacted"
+  - "Intro meeting agreed"
+  - "Awaiting confirmation / Not Now"
+  - "Qualify"
+  - "Discover"
+  - "Validate"
+  - "Decide"
+  - "Commit"
+  - "Tech intro"
+  - "Implementation"
+  - "Testing"
