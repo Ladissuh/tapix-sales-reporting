@@ -84,7 +84,7 @@ posílal je do SharePointu, teď stačí zjednodušit:
 tapix-sales-reporting/
 ├── .github/workflows/weekly_report.yml   # týdenní běh (pondělí) + manuální spuštění
 ├── config/
-│   ├── sales_goals.yaml                  # roční cíle obchodníků - uprav kdykoliv
+│   ├── owners.yaml                        # WHITELIST obchodníků + mapování jmen + cíle - uprav kdykoliv
 │   └── stage_probabilities.yaml          # váhy fází - uprav kdykoliv
 ├── data/
 │   ├── deals_snapshots.csv               # historie otevřené pipeline (roste každý týden)
@@ -111,11 +111,35 @@ cp .env.example .env      # a doplň skutečný HUBSPOT_TOKEN
 python src/main.py
 ```
 
-## 9. Co dělat, když...
+## 9. Historický import (už hotovo, jen pro info)
 
-- **Přibude nový obchodník:** doplň ho do `config/sales_goals.yaml`
-  (klidně s `null`, pokud ještě nemá cíl). List se mu vytvoří automaticky
-  hned, jakmile se v HubSpotu objeví jeho první deal.
+Data z tvého dosavadního `Sales_reporting_2026.xlsx` (týdny 1–28, tj. od
+4.1. do konce června) už jsou naimportovaná v `data/deals_snapshots.csv`
+a `data/deals_closed_ledger.csv` - stačí je commitnout spolu se zbytkem
+repa a GitHub Actions na ně od příštího pondělí jen přidá nové týdny.
+
+Pár poznámek k importu:
+- U historických Won/Lost řádků chybí **Company** (název firmy) - dosavadní
+  ruční tabulka měla jen Company ID, ne název, a bez HubSpot tokenu jsem ho
+  nemohl dohledat. Nové (automaticky stahované) Won/Lost řádky už název
+  firmy mít budou. Pokud chceš historii dopočítat, spusť lokálně (s
+  nastaveným `.env`): `python src/import_historical.py cesta/k/souboru.xlsx`
+  - tentokrát se company názvy dotáhnou z HubSpotu automaticky.
+- Historické stage částky (Tabulka 1) jsou importované jako souhrn za
+  celou pipeline, ne po jednotlivých dealech - to je jediná informace,
+  kterou starý systém uchovával. Od teď už se bude ukládat na úrovni
+  jednotlivého dealu (přesnější podklad pro průměrnou velikost dealu,
+  funnel apod.).
+- Do reportu se z historie promítnou jen obchodníci uvedení v
+  `config/owners.yaml` - `Ainaz` (už ve firmě není) se do importu vůbec
+  nezahrnula.
+
+## 10. Co dělat, když...
+
+- **Přibude nový obchodník:** doplň ho do `config/owners.yaml` (hubspot_name
+  musí přesně sedět se jménem v HubSpotu, display_name je název listu,
+  annual_goal klidně `null`, pokud cíl ještě nemá). Kdo NENÍ v tomto
+  souboru, se v reportu vůbec neobjeví - i kdyby v HubSpotu vlastnil dealy.
 - **Změní se váhy fází nebo přibude nová stage:** uprav
   `config/stage_probabilities.yaml` - nic jiného se měnit nemusí.
 - **Chceš zobrazovat víc/míň týdnů historie:** `DISPLAY_WEEKS` konstanta

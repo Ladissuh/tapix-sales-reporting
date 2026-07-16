@@ -118,10 +118,9 @@ def get_stage_metadata(token: str) -> Tuple[Dict[str, str], List[str], set, set]
 
 
 def fetch_deals(token: str, cutoff_epoch_ms: int) -> List[dict]:
-    """
-    Stáhne VŠECHNY dealy s closedate < cutoff, včetně dealname a asociované
-    company (přes 'associations' parametr - žádné extra volání navíc).
-    """
+    """Stáhne VŠECHNY dealy s closedate < cutoff. Asociace na company se
+    NEŘEŠÍ tady (Search API je pro `associations` parametr nespolehlivé) -
+    viz get_deal_company_ids() níž, což je oficiální doporučený postup."""
     url = f"{HUBSPOT_BASE}/crm/v3/objects/deals/search"
     body = {
         "filterGroups": [
@@ -132,7 +131,6 @@ def fetch_deals(token: str, cutoff_epoch_ms: int) -> List[dict]:
             }
         ],
         "properties": ["dealname", "dealstage", "amount", "hubspot_owner_id", "closedate", "pipeline"],
-        "associations": ["companies"],
         "limit": 100,
         "sorts": [{"propertyName": "closedate", "direction": "DESCENDING"}],
     }
@@ -150,6 +148,29 @@ def fetch_deals(token: str, cutoff_epoch_ms: int) -> List[dict]:
     return all_deals
 
 
+def get_deal_company_ids(token: str, deal_ids: List[str]) -> Dict[str, str]:
+    """
+    deal_id -> primary company_id, přes oficiální batch associations endpoint
+    (spolehlivější než `associations` parametr na /search, který HubSpot
+    v praxi ne vždy vrací).
+    """
+    if not deal_ids:
+        return {}
+    url = f"{HUBSPOT_BASE}/crm/v4/associations/deals/companies/batch/read"
+    result: Dict[str, str] = {}
+    unique_ids = list(dict.fromkeys(deal_ids))
+    for i in range(0, len(unique_ids), 100):
+        chunk = unique_ids[i:i + 100]
+        body = {"inputs": [{"id": did} for did in chunk]}
+        data = _post_with_retry(url, token, body)
+        for r in data.get("results", []):
+            from_id = str((r.get("from") or {}).get("id"))
+            to_list = r.get("to") or []
+            if from_id and to_list:
+                result[from_id] = str(to_list[0].get("toObjectId"))
+    return result
+
+
 def get_company_names(token: str, company_ids: List[str]) -> Dict[str, str]:
     """Batch-read názvů firem pro dané company_id (max 100 na dávku)."""
     if not company_ids:
@@ -164,11 +185,3 @@ def get_company_names(token: str, company_ids: List[str]) -> Dict[str, str]:
         for r in data.get("results", []):
             names[str(r.get("id"))] = (r.get("properties") or {}).get("name", "")
     return names
-
-
-def extract_primary_company_id(deal: dict) -> str:
-    assoc = (deal.get("associations") or {}).get("companies") or {}
-    results = assoc.get("results") or []
-    if results:
-        return str(results[0].get("id"))
-    return ""

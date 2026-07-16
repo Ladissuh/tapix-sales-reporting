@@ -1,0 +1,51 @@
+# Jediný zdroj pravdy pro to, KDO se má v reportu objevit.
+#
+# Do reportu se zahrnou VÝHRADNĚ lidé uvedení v tomto seznamu. Každý jiný
+# vlastník dealu v HubSpotu (bývalí zaměstnanci, kolegové z jiných týmů,
+# nepřiřazené dealy...) se automaticky ignoruje - nevytváří se mu list.
+#
+# hubspot_name MUSÍ přesně (včetně diakritiky/mezer) odpovídat jménu, jak ho
+# vrací HubSpot Owners API - to je to, co dnes vidíš jako název listu typu
+# "Martin Korbelar" nebo "Oldřich Huzil". Pokud si nejsi jistý přesným
+# zápisem, najdeš ho i v záložce Settings -> Users & Teams v HubSpotu.
+#
+# display_name je kratší jméno, které se použije jako název listu a v grafech.
+# annual_goal: null = cíl zatím není stanovený (graf "tempo k cíli" se vynechá).
+
+owners:
+  - hubspot_name: "Martin Korbelar"
+    display_name: "Martin"
+    annual_goal: 950000
+  - hubspot_name: "Lukas Hora"
+    display_name: "Lukáš"
+    annual_goal: null
+  - hubspot_name: "Veronika Kincová"
+    display_name: "Veronika"
+    annual_goal: 800000
+  - hubspot_name: "Mykyta Artiukhov"
+    display_name: "Mykyta"
+    annual_goal: 380000
+  - hubspot_name: "Richard Brůža"
+    display_name: "Richard"
+    annual_goal: 1000000
+  - hubspot_name: "Oldřich Huzil"
+    display_name: "Olda"
+    annual_goal: 700000
+  - hubspot_name: "Julie Mrkvickova"
+    display_name: "Julie"
+    annual_goal: null
+  - hubspot_name: "Dominika Šudová"
+    display_name: "Dominika"
+    annual_goal: null
+
+  # Tihle se objevili v datech, ale zatím NEJSOU zahrnutí - odkomentuj a
+  # doplň display_name/goal, pokud mají v reportu být:
+  # - hubspot_name: "Oldřich Kašpar"
+  #   display_name: "???"
+  #   annual_goal: null
+  # - hubspot_name: "Ivan Dovica"
+  #   display_name: "Ivan"
+  #   annual_goal: null
+  # - hubspot_name: "Tomáš Kovář"
+  #   display_name: "Tomáš"
+  #   annual_goal: null

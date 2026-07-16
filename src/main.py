@@ -46,14 +46,22 @@ DEFAULT_PROBABILITY = 0.5
 
 
 def load_config():
-    with open(CONFIG_DIR / "sales_goals.yaml", encoding="utf-8") as f:
-        goals_cfg = yaml.safe_load(f) or {}
+    with open(CONFIG_DIR / "owners.yaml", encoding="utf-8") as f:
+        owners_cfg = yaml.safe_load(f) or {}
     with open(CONFIG_DIR / "stage_probabilities.yaml", encoding="utf-8") as f:
         stage_cfg = yaml.safe_load(f) or {}
-    goals = goals_cfg.get("owners", {}) or {}
+
+    owners_list = owners_cfg.get("owners", []) or []
+    # hubspot_name -> display_name (whitelist zároveň slouží jako filtr)
+    name_map = {o["hubspot_name"]: o["display_name"] for o in owners_list}
+    # display_name -> annual_goal
+    goals = {o["display_name"]: o.get("annual_goal") for o in owners_list}
+    # pořadí listů v reportu = pořadí v configu
+    display_order = [o["display_name"] for o in owners_list]
+
     stage_probs = stage_cfg.get("stages", {}) or {}
     stage_order = stage_cfg.get("stage_order", list(stage_probs.keys()))
-    return goals, stage_probs, stage_order
+    return name_map, goals, display_order, stage_probs, stage_order
 
 
 def fetch_and_persist(week_label: str, week_monday: date):
@@ -77,8 +85,9 @@ def fetch_and_persist(week_label: str, week_monday: date):
         else:
             open_deals.append(d)
 
-    company_ids = [hs.extract_primary_company_id(d) for d in closed_deals]
-    company_names = hs.get_company_names(token, [c for c in company_ids if c])
+    deal_ids = [d.get("id") for d in closed_deals]
+    company_ids_by_deal = hs.get_deal_company_ids(token, deal_ids)
+    company_names = hs.get_company_names(token, list(company_ids_by_deal.values()))
 
     # ---- Weekly snapshot (jen otevřené dealy) ----
     snap_rows = []
@@ -120,7 +129,7 @@ def fetch_and_persist(week_label: str, week_monday: date):
             amount_val = float(amount) if amount not in (None, "") else 0.0
         except ValueError:
             amount_val = 0.0
-        cid = hs.extract_primary_company_id(d)
+        cid = company_ids_by_deal.get(str(d.get("id")), "")
         closedate_raw = props.get("closedate")
         close_week_label = metrics.week_label_for_date(closedate_raw) if closedate_raw else week_label
         ledger_rows.append({
@@ -138,17 +147,27 @@ def fetch_and_persist(week_label: str, week_monday: date):
 
 
 def build_report(week_monday: date):
-    goals, stage_probs, stage_order = load_config()
+    name_map, goals, display_order, stage_probs, stage_order = load_config()
 
     snapshots_df = store.load_or_empty(SNAPSHOTS_PATH, store.SNAPSHOTS_COLUMNS)
     ledger_df = store.load_or_empty(LEDGER_PATH, store.LEDGER_COLUMNS)
+
+    # Whitelist + přejmenování na display_name - VŠECHNO ostatní (bývalí
+    # zaměstnanci, kolegové z jiných týmů, Unassigned...) se odsud vypadne
+    # a dál v reportu vůbec neexistuje.
+    if not snapshots_df.empty:
+        snapshots_df = snapshots_df[snapshots_df["owner_name"].isin(name_map.keys())].copy()
+        snapshots_df["owner_name"] = snapshots_df["owner_name"].map(name_map)
     if not ledger_df.empty:
+        ledger_df = ledger_df[ledger_df["owner_name"].isin(name_map.keys())].copy()
+        ledger_df["owner_name"] = ledger_df["owner_name"].map(name_map)
         ledger_df = ledger_df.rename(columns={"week_label": "close_week_label"})
 
     all_week_labels = metrics.ordered_week_labels(snapshots_df)
     week_labels = all_week_labels[-DISPLAY_WEEKS:] if len(all_week_labels) > DISPLAY_WEEKS else all_week_labels
     if not week_labels:
-        raise RuntimeError("Žádná historická data - spusť nejdřív fetch_and_persist alespoň jednou.")
+        raise RuntimeError("Žádná historická data pro nakonfigurované obchodníky - "
+                            "zkontroluj, jestli hubspot_name v config/owners.yaml přesně sedí.")
 
     # Krátký, čitelný label do hlavičky sloupců (jen datum pondělí)
     week_monday_lookup = (
@@ -177,7 +196,9 @@ def build_report(week_monday: date):
     )
     wl = metrics.won_lost_by_owner(ledger_df, week_labels)
 
-    owners_present = sorted(set(list(goals.keys()) + list(weighted_full.keys()) + list(wl.keys())))
+    # Pevné pořadí a přesně ti lidé, co jsou v config/owners.yaml - ne "kdokoliv
+    # se objevil v datech".
+    owners_present = display_order
 
     wb = rb.new_workbook()
 
