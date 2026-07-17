@@ -1,187 +1,97 @@
-"""
-Veškerá komunikace s HubSpot API na jednom místě.
-Nahrazuje logiku z obou dnešních skriptů (hubspot_weekly_report_2026.py
-a hubspot_weekly_report_dynamic_2026.py) - stahuje se ale jen JEDNOU,
-s nejširším (18měsíčním) cutoffem; užší "do konce roku" pohled se filtruje
-až lokálně v metrics.py.
-"""
-import os
-import time
+import os, time
 from typing import Dict, List, Tuple
-
+from pathlib import Path
 import requests
+from dotenv import load_dotenv
 
 HUBSPOT_BASE = "https://api.hubapi.com"
 
-
-def load_token() -> str:
+def load_token():
+    load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
     token = os.getenv("HUBSPOT_TOKEN")
-    if not token:
-        raise RuntimeError(
-            "Chybí HUBSPOT_TOKEN. Lokálně: založ .env s HUBSPOT_TOKEN=pat-..., "
-            "na GitHubu: Settings -> Secrets and variables -> Actions."
-        )
+    if not token: raise RuntimeError("Chybí HUBSPOT_TOKEN.")
     return token
 
+def _h(token): return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+def _sleep(a): time.sleep(min(2**a, 32))
 
-def _headers(token: str) -> Dict[str, str]:
-    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-
-def _backoff_sleep(attempt: int) -> None:
-    time.sleep(min(2 ** attempt, 32))
-
-
-def _get_with_retry(url: str, token: str, params: dict = None) -> dict:
-    attempt = 0
+def _get(url, token, params=None):
+    a = 0
     while True:
-        resp = requests.get(url, headers=_headers(token), params=params)
-        if resp.status_code == 429 or 500 <= resp.status_code < 600:
-            attempt += 1
-            _backoff_sleep(attempt)
-            continue
-        resp.raise_for_status()
-        return resp.json()
+        r = requests.get(url, headers=_h(token), params=params)
+        if r.status_code == 429 or 500 <= r.status_code < 600: a+=1; _sleep(a); continue
+        r.raise_for_status(); return r.json()
 
-
-def _post_with_retry(url: str, token: str, body: dict) -> dict:
-    attempt = 0
+def _post(url, token, body):
+    a = 0
     while True:
-        resp = requests.post(url, headers=_headers(token), json=body)
-        if resp.status_code == 429 or 500 <= resp.status_code < 600:
-            attempt += 1
-            _backoff_sleep(attempt)
-            continue
-        resp.raise_for_status()
-        return resp.json()
+        r = requests.post(url, headers=_h(token), json=body)
+        if r.status_code == 429 or 500 <= r.status_code < 600: a+=1; _sleep(a); continue
+        r.raise_for_status(); return r.json()
 
-
-def get_all_owners(token: str) -> Dict[str, str]:
-    """owner_id -> display name"""
-    url = f"{HUBSPOT_BASE}/crm/v3/owners/"
-    owners_map: Dict[str, str] = {}
-    params = {"limit": 100, "archived": "false"}
+def get_all_owners(token):
+    out = {}; params = {"limit": 100, "archived": "false"}
     while True:
-        data = _get_with_retry(url, token, params)
+        data = _get(f"{HUBSPOT_BASE}/crm/v3/owners/", token, params)
         for o in data.get("results", []):
-            owner_id = str(o.get("id"))
-            name = (
-                f"{o.get('firstName', '')} {o.get('lastName', '')}".strip()
-                or o.get("email", f"Owner {owner_id}")
-            )
-            owners_map[owner_id] = name
-        next_after = data.get("paging", {}).get("next", {}).get("after")
-        if not next_after:
-            break
-        params["after"] = next_after
-    return owners_map
+            oid = str(o.get("id"))
+            out[oid] = f"{o.get('firstName','')} {o.get('lastName','')}".strip() or o.get("email", f"Owner {oid}")
+        nxt = data.get("paging",{}).get("next",{}).get("after")
+        if not nxt: break
+        params["after"] = nxt
+    return out
 
-
-def get_stage_metadata(token: str) -> Tuple[Dict[str, str], List[str], set, set]:
-    """
-    Vrací:
-      stage_label_map: stage_id -> label
-      default_order:   pořadí labelů dle první pipeline
-      closed_won_ids:  set stage_id, které HubSpot eviduje jako Closed Won
-      closed_lost_ids: set stage_id, které HubSpot eviduje jako Closed Lost
-
-    Detekce Won/Lost jde přes stage metadata "probability" (HubSpot
-    konvence: 1.0 = closed won, 0.0 = closed lost). Pokud váš pipeline
-    tuhle konvenci nedodržuje, uprav podmínku níž.
-    """
-    url = f"{HUBSPOT_BASE}/crm/v3/pipelines/deals"
-    data = _get_with_retry(url, token)
-
-    stage_label_map: Dict[str, str] = {}
-    default_order: List[str] = []
-    closed_won_ids, closed_lost_ids = set(), set()
-
+def get_stage_metadata(token):
+    data = _get(f"{HUBSPOT_BASE}/crm/v3/pipelines/deals", token)
+    label_map, order, won_ids, lost_ids = {}, [], set(), set()
     for pipe in data.get("results", []):
         stages = pipe.get("stages", [])
-        if not default_order:
-            default_order = [s.get("label", s.get("id")) for s in stages]
+        if not order: order = [s.get("label", s.get("id")) for s in stages]
         for s in stages:
-            sid = s.get("id")
-            stage_label_map[sid] = s.get("label", sid)
-            prob = (s.get("metadata") or {}).get("probability")
-            if prob is not None:
+            sid = s.get("id"); label_map[sid] = s.get("label", sid)
+            p = (s.get("metadata") or {}).get("probability")
+            if p is not None:
                 try:
-                    p = float(prob)
-                    if p >= 0.999:
-                        closed_won_ids.add(sid)
-                    elif p <= 0.001:
-                        closed_lost_ids.add(sid)
-                except ValueError:
-                    pass
+                    pf = float(p)
+                    if pf >= 0.999: won_ids.add(sid)
+                    elif pf <= 0.001: lost_ids.add(sid)
+                except ValueError: pass
+    return label_map, order, won_ids, lost_ids
 
-    return stage_label_map, default_order, closed_won_ids, closed_lost_ids
-
-
-def fetch_deals(token: str, cutoff_epoch_ms: int) -> List[dict]:
-    """Stáhne VŠECHNY dealy s closedate < cutoff. Asociace na company se
-    NEŘEŠÍ tady (Search API je pro `associations` parametr nespolehlivé) -
-    viz get_deal_company_ids() níž, což je oficiální doporučený postup."""
+def fetch_deals(token, cutoff_epoch_ms):
     url = f"{HUBSPOT_BASE}/crm/v3/objects/deals/search"
     body = {
-        "filterGroups": [
-            {
-                "filters": [
-                    {"propertyName": "closedate", "operator": "LT", "value": cutoff_epoch_ms}
-                ]
-            }
-        ],
-        "properties": ["dealname", "dealstage", "amount", "hubspot_owner_id", "closedate", "pipeline"],
-        "limit": 100,
-        "sorts": [{"propertyName": "closedate", "direction": "DESCENDING"}],
+        "filterGroups": [{"filters": [{"propertyName": "closedate", "operator": "LT", "value": cutoff_epoch_ms}]}],
+        "properties": ["dealname","dealstage","amount","hubspot_owner_id","closedate","pipeline"],
+        "limit": 100, "sorts": [{"propertyName": "closedate", "direction": "DESCENDING"}],
     }
-
-    all_deals: List[dict] = []
-    after = None
+    deals = []; after = None
     while True:
-        if after:
-            body["after"] = after
-        data = _post_with_retry(url, token, body)
-        all_deals.extend(data.get("results", []))
-        after = data.get("paging", {}).get("next", {}).get("after")
-        if not after:
-            break
-    return all_deals
+        if after: body["after"] = after
+        data = _post(url, token, body); deals.extend(data.get("results", []))
+        after = data.get("paging",{}).get("next",{}).get("after")
+        if not after: break
+    return deals
 
-
-def get_deal_company_ids(token: str, deal_ids: List[str]) -> Dict[str, str]:
-    """
-    deal_id -> primary company_id, přes oficiální batch associations endpoint
-    (spolehlivější než `associations` parametr na /search, který HubSpot
-    v praxi ne vždy vrací).
-    """
-    if not deal_ids:
-        return {}
+def get_deal_company_ids(token, deal_ids):
+    if not deal_ids: return {}
     url = f"{HUBSPOT_BASE}/crm/v4/associations/deals/companies/batch/read"
-    result: Dict[str, str] = {}
-    unique_ids = list(dict.fromkeys(deal_ids))
-    for i in range(0, len(unique_ids), 100):
-        chunk = unique_ids[i:i + 100]
-        body = {"inputs": [{"id": did} for did in chunk]}
-        data = _post_with_retry(url, token, body)
+    result = {}
+    for i in range(0, len(deal_ids), 100):
+        chunk = list(dict.fromkeys(deal_ids))[i:i+100]
+        data = _post(url, token, {"inputs": [{"id": d} for d in chunk]})
         for r in data.get("results", []):
-            from_id = str((r.get("from") or {}).get("id"))
-            to_list = r.get("to") or []
-            if from_id and to_list:
-                result[from_id] = str(to_list[0].get("toObjectId"))
+            fid = str((r.get("from") or {}).get("id")); to = r.get("to") or []
+            if fid and to: result[fid] = str(to[0].get("toObjectId"))
     return result
 
-
-def get_company_names(token: str, company_ids: List[str]) -> Dict[str, str]:
-    """Batch-read názvů firem pro dané company_id (max 100 na dávku)."""
-    if not company_ids:
-        return {}
+def get_company_names(token, company_ids):
+    if not company_ids: return {}
     url = f"{HUBSPOT_BASE}/crm/v3/objects/companies/batch/read"
-    names: Dict[str, str] = {}
-    unique_ids = list(dict.fromkeys(company_ids))
-    for i in range(0, len(unique_ids), 100):
-        chunk = unique_ids[i:i + 100]
-        body = {"properties": ["name"], "inputs": [{"id": cid} for cid in chunk]}
-        data = _post_with_retry(url, token, body)
+    names = {}
+    for i in range(0, len(company_ids), 100):
+        chunk = list(dict.fromkeys(company_ids))[i:i+100]
+        data = _post(url, token, {"properties": ["name"], "inputs": [{"id": c} for c in chunk]})
         for r in data.get("results", []):
             names[str(r.get("id"))] = (r.get("properties") or {}).get("name", "")
     return names
