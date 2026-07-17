@@ -56,26 +56,37 @@ def get_stage_metadata(token):
     Otevřené fáze mohou mít probability 0% (např. 'Not Now'/'Awaiting
     confirmation') nebo blízko 100%, aniž by byly ve skutečnosti uzavřené -
     probability samo o sobě NENÍ spolehlivý signál uzavřenosti.
+
+    Vrací (label_map, stage_id_order, won_ids, lost_ids, probability_map):
+      label_map:       stage_id -> label (ořezáno o mezery na krajích)
+      stage_id_order:  seznam stage_id v pořadí, jak je HubSpot vrací
+                        (= pořadí v pipeline nastavení)
+      probability_map: stage_id -> float (přímo z HubSpot metadata,
+                        NEZÁVISLE na tom, jestli je fáze uzavřená)
     """
     data = _get(f"{HUBSPOT_BASE}/crm/v3/pipelines/deals", token)
-    label_map, order, won_ids, lost_ids = {}, [], set(), set()
+    label_map, stage_id_order, won_ids, lost_ids, probability_map = {}, [], set(), set(), {}
     for pipe in data.get("results", []):
         stages = pipe.get("stages", [])
-        if not order: order = [(s.get("label") or s.get("id")).strip() for s in stages]
         for s in stages:
-            sid = s.get("id"); label_map[sid] = (s.get("label") or sid).strip()
+            sid = s.get("id")
+            if sid in label_map:
+                continue  # stejné stage_id se nesmí přidat 2x (víc pipelines)
+            label_map[sid] = (s.get("label") or sid).strip()
+            stage_id_order.append(sid)
             meta = s.get("metadata") or {}
+            prob = meta.get("probability")
+            try:
+                probability_map[sid] = float(prob) if prob is not None else None
+            except ValueError:
+                probability_map[sid] = None
             is_closed = str(meta.get("isClosed", "")).strip().lower() == "true"
             if not is_closed:
                 continue
-            prob = meta.get("probability")
-            try:
-                pf = float(prob) if prob is not None else 0.0
-            except ValueError:
-                pf = 0.0
+            pf = probability_map[sid] or 0.0
             if pf >= 0.5: won_ids.add(sid)
             else: lost_ids.add(sid)
-    return label_map, order, won_ids, lost_ids
+    return label_map, stage_id_order, won_ids, lost_ids, probability_map
 
 def _search_deals(token, filters, extra_props=None):
     url = f"{HUBSPOT_BASE}/crm/v3/objects/deals/search"

@@ -50,11 +50,54 @@ def is_closed_lost(stage_id, stage_label, closed_lost_ids):
     if stage_id in closed_lost_ids: return True
     return (stage_label or "").strip().lower() in CLOSED_LOST_LABELS
 
+def sync_stage_probabilities_from_hubspot(stage_label_map, stage_id_order, closed_ids, probability_map):
+    """
+    Přepíše config/stage_probabilities.yaml aktuálním stavem z HubSpotu -
+    žádný ručně přepisovaný seznam fází, který se může časem rozejít se
+    skutečností (přejmenování fáze, jiná velikost písmen, mezery navíc...).
+
+    HubSpot je VŽDY autoritativní zdroj - jak seznam otevřených fází
+    (v pořadí, v jakém je má pipeline), tak jejich váha (probability).
+    Žádné "ruční přebití" se nezachovává, protože přesně tenhle mechanismus
+    (ručně přepsaná/zastaralá hodnota) byl příčinou nesrovnalostí, které
+    řešíme.
+    """
+    seen = set()
+    new_stage_order = []
+    new_stage_probs = {}
+    for sid in stage_id_order:
+        if sid in closed_ids:
+            continue
+        lbl = stage_label_map.get(sid, sid)
+        if lbl in seen:
+            continue
+        seen.add(lbl)
+        new_stage_order.append(lbl)
+        hubspot_prob = probability_map.get(sid)
+        if hubspot_prob is not None:
+            new_stage_probs[lbl] = round(hubspot_prob, 4)
+        else:
+            new_stage_probs[lbl] = DEFAULT_PROBABILITY
+            print(f"VAROVÁNÍ: fáze {repr(lbl)} nemá v HubSpotu nastavenou probability, "
+                  f"používám výchozí {DEFAULT_PROBABILITY}.")
+
+    print("Živé fáze z HubSpotu -> config/stage_probabilities.yaml:")
+    for lbl in new_stage_order:
+        print(f"  {repr(lbl)}: {new_stage_probs[lbl]}")
+
+    out = {"stages": new_stage_probs, "stage_order": new_stage_order}
+    stage_yaml_path = CONFIG_DIR / "stage_probabilities.yaml"
+    with open(stage_yaml_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(out, f, allow_unicode=True, sort_keys=False)
+
+
 def fetch_and_persist(week_label, week_monday):
     token = hs.load_token()
     owners_map = hs.get_all_owners(token)
-    stage_label_map, _, closed_won_ids, closed_lost_ids = hs.get_stage_metadata(token)
+    stage_label_map, stage_id_order, closed_won_ids, closed_lost_ids, probability_map = hs.get_stage_metadata(token)
     closed_ids = closed_won_ids | closed_lost_ids
+
+    sync_stage_probabilities_from_hubspot(stage_label_map, stage_id_order, closed_ids, probability_map)
 
     print(f"Closed Won stage IDs:  {closed_won_ids}")
     print(f"Closed Lost stage IDs: {closed_lost_ids}")
@@ -63,7 +106,7 @@ def fetch_and_persist(week_label, week_monday):
         marker = "  <- UZAVŘENÁ" if sid in closed_ids else ""
         print(f"  {sid} -> {repr(lbl)}{marker}")
     if not closed_ids:
-        print("VAROVÁNÍ: HubSpot nevrátil žádné stage s probability 0.0/1.0 - "
+        print("VAROVÁNÍ: HubSpot nevrátil žádnou fázi s isClosed=true - "
               "roztřídění poběží jen podle stage labelu (viz CLOSED_WON_LABELS/CLOSED_LOST_LABELS).")
 
     # --- Pipeline snapshot: PŘESNĚ jako oba staré skripty - filtr JEN na
