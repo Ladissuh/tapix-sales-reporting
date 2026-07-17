@@ -61,9 +61,9 @@ def get_stage_metadata(token):
     label_map, order, won_ids, lost_ids = {}, [], set(), set()
     for pipe in data.get("results", []):
         stages = pipe.get("stages", [])
-        if not order: order = [s.get("label", s.get("id")) for s in stages]
+        if not order: order = [(s.get("label") or s.get("id")).strip() for s in stages]
         for s in stages:
-            sid = s.get("id"); label_map[sid] = s.get("label", sid)
+            sid = s.get("id"); label_map[sid] = (s.get("label") or sid).strip()
             meta = s.get("metadata") or {}
             is_closed = str(meta.get("isClosed", "")).strip().lower() == "true"
             if not is_closed:

@@ -38,8 +38,8 @@ def load_config():
     name_map      = {o["hubspot_name"]: o["display_name"] for o in ol}
     goals         = {o["display_name"]: o.get("annual_goal") for o in ol}
     display_order = [o["display_name"] for o in ol]
-    stage_probs   = sc.get("stages", {}) or {}
-    stage_order   = sc.get("stage_order", list(stage_probs.keys()))
+    stage_probs   = {k.strip(): v for k, v in (sc.get("stages", {}) or {}).items()}
+    stage_order   = [s.strip() for s in sc.get("stage_order", list(stage_probs.keys()))]
     return name_map, goals, display_order, stage_probs, stage_order
 
 def is_closed_won(stage_id, stage_label, closed_won_ids):
@@ -58,6 +58,10 @@ def fetch_and_persist(week_label, week_monday):
 
     print(f"Closed Won stage IDs:  {closed_won_ids}")
     print(f"Closed Lost stage IDs: {closed_lost_ids}")
+    print("Stage labely z HubSpotu (repr, ať jsou vidět případné mezery navíc):")
+    for sid, lbl in stage_label_map.items():
+        marker = "  <- UZAVŘENÁ" if sid in closed_ids else ""
+        print(f"  {sid} -> {repr(lbl)}{marker}")
     if not closed_ids:
         print("VAROVÁNÍ: HubSpot nevrátil žádné stage s probability 0.0/1.0 - "
               "roztřídění poběží jen podle stage labelu (viz CLOSED_WON_LABELS/CLOSED_LOST_LABELS).")
