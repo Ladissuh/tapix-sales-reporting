@@ -58,11 +58,16 @@ def won_lost_by_owner(ledger_df, week_labels):
 def build_owner_report_rows(weighted_full, weighted_eoy, won, lost, won_cnt, lost_cnt, stage_order, annual_goal):
     n = len(won)
     rolling18 = [sum(weighted_full.get(s,[0]*n)[w] for s in stage_order) for w in range(n)]
-    pipeline_eoy = [sum(weighted_eoy.get(s,[0]*n)[w] for s in stage_order)+won[w] for w in range(n)]
-    changes = [pipeline_eoy[0]]+[pipeline_eoy[w]-pipeline_eoy[w-1] for w in range(1,n)]
     wc = lc = 0; won_cum = []; lost_cum = []
     for w in range(n):
         wc += won[w]; lc += lost[w]; won_cum.append(wc); lost_cum.append(lc)
+    # Pipeline till end of year = vážené stage hodnoty (do konce roku) + KUMULATIVNÍ
+    # Won od začátku roku (ne jen týdenní Won) - přesně dle původního vzorce
+    # '=(SUM(B55:B65,B67,B70))', kde B67 = "Won stacked" (kumulativní).
+    pipeline_eoy = [sum(weighted_eoy.get(s,[0]*n)[w] for s in stage_order)+won_cum[w] for w in range(n)]
+    # Changes in pipeline = mezitýdenní delta ROLLING 18 (ne Pipeline till end
+    # of year) - přesně dle původního vzorce '=C74-B74', kde řádek 74 = Rolling 18.
+    changes = [rolling18[0]]+[rolling18[w]-rolling18[w-1] for w in range(1,n)]
     win_rate = [(won_cum[w]/(won_cum[w]+lost_cum[w])) if (won_cum[w]+lost_cum[w]) else 0.0 for w in range(n)]
     cwc = clc = 0; avg_deal = []
     for w in range(n):
