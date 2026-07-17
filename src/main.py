@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import hubspot_client as hs, data_store as store, metrics, report_builder as rb
 
 LOCAL_TZ = "Europe/Prague"
-DISPLAY_WEEKS = 20
+DISPLAY_WEEKS = None  # None = zobrazit VŠECHNY týdny od W1; jinak počet posledních týdnů
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = REPO_ROOT / "config"
 DATA_DIR   = REPO_ROOT / "data"
@@ -241,9 +241,31 @@ def build_report(week_monday):
         ledger = ledger.rename(columns={"week_label": "close_week_label"})
 
     all_wl      = metrics.ordered_week_labels(snap)
-    week_labels = all_wl[-DISPLAY_WEEKS:] if len(all_wl) > DISPLAY_WEEKS else all_wl
+    week_labels = all_wl[-DISPLAY_WEEKS:] if (DISPLAY_WEEKS and len(all_wl) > DISPLAY_WEEKS) else all_wl
     if not week_labels:
         raise RuntimeError("Žádná historická data.")
+
+    # Kolik týdnů uběhlo PŘED prvním zobrazeným sloupcem - pro Goal pacing
+    # (aby "Goal (kumulativně)" počítalo se skutečným týdnem od začátku roku).
+    week_offset = len(all_wl) - len(week_labels)
+
+    # Won/Lost, které se staly PŘED zobrazeným oknem - aby "Won (kumulativně)",
+    # "Win rate" a "Prům. velikost dealu" odrážely celou historii, ne jen to,
+    # co je vidět v tabulce (jinak by starší Won/Lost prostě zmizely ze
+    # všech součtů, ne jen z řádku).
+    displayed_week_set = set(week_labels)
+    baseline_won, baseline_lost = {}, {}
+    baseline_won_cnt, baseline_lost_cnt = {}, {}
+    if not ledger.empty:
+        before_df = ledger[~ledger["close_week_label"].isin(displayed_week_set)]
+    else:
+        before_df = ledger
+    for owner in name_map.values():
+        odf = before_df[before_df["owner_name"] == owner] if not before_df.empty else before_df
+        baseline_won[owner] = float(odf[odf["outcome"] == "won"]["amount"].sum()) if not odf.empty else 0.0
+        baseline_lost[owner] = float(odf[odf["outcome"] == "lost"]["amount"].sum()) if not odf.empty else 0.0
+        baseline_won_cnt[owner] = int((odf["outcome"] == "won").sum()) if not odf.empty else 0
+        baseline_lost_cnt[owner] = int((odf["outcome"] == "lost").sum()) if not odf.empty else 0
 
     wml = snap[["week_label","week_monday"]].drop_duplicates().set_index("week_label")["week_monday"]
     week_labels_display = []
@@ -294,9 +316,13 @@ def build_report(week_monday):
             wf.get(owner, {s: z for s in stage_order}),
             we.get(owner, {s: z for s in stage_order}),
             wl_o["won"], wl_o["lost"], wl_o["won_cnt"], wl_o["lost_cnt"],
-            stage_order, goals.get(owner))
+            stage_order, goals.get(owner),
+            baseline_won=baseline_won.get(owner, 0.0), baseline_lost=baseline_lost.get(owner, 0.0),
+            baseline_won_cnt=baseline_won_cnt.get(owner, 0), baseline_lost_cnt=baseline_lost_cnt.get(owner, 0),
+            week_offset=week_offset)
         rb.build_person_sheet(wb, owner, rows, stage_order, week_labels_display, week_labels_display)
-        lb_totals[owner] = sum(wl_o["won"])
+        # Celkový Won (žebříček) = baseline (před oknem) + zobrazené týdny
+        lb_totals[owner] = baseline_won.get(owner, 0.0) + sum(wl_o["won"])
 
     agg_wf = {s: [sum(wf.get(o,{}).get(s,z)[w] for o in owners) for w in range(len(week_labels))] for s in stage_order}
     agg_we = {s: [sum(we.get(o,{}).get(s,z)[w] for o in owners) for w in range(len(week_labels))] for s in stage_order}
@@ -305,9 +331,16 @@ def build_report(week_monday):
     agg_wc   = [sum(wl.get(o,{"won_cnt": z})["won_cnt"][w]   for o in owners) for w in range(len(week_labels))]
     agg_lc   = [sum(wl.get(o,{"lost_cnt":z})["lost_cnt"][w]  for o in owners) for w in range(len(week_labels))]
     total_goal = sum(v for v in goals.values() if v)
+    agg_baseline_won = sum(baseline_won.get(o, 0.0) for o in owners)
+    agg_baseline_lost = sum(baseline_lost.get(o, 0.0) for o in owners)
+    agg_baseline_won_cnt = sum(baseline_won_cnt.get(o, 0) for o in owners)
+    agg_baseline_lost_cnt = sum(baseline_lost_cnt.get(o, 0) for o in owners)
     agg_rows = metrics.build_owner_report_rows(
         agg_wf, agg_we, agg_won, agg_lost, agg_wc, agg_lc,
-        stage_order, total_goal or None)
+        stage_order, total_goal or None,
+        baseline_won=agg_baseline_won, baseline_lost=agg_baseline_lost,
+        baseline_won_cnt=agg_baseline_won_cnt, baseline_lost_cnt=agg_baseline_lost_cnt,
+        week_offset=week_offset)
     rb.build_aggregation_sheet(wb, agg_rows, stage_order, week_labels_display, week_labels_display,
                                sorted(lb_totals.items(), key=lambda x: -x[1]))
 

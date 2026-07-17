@@ -74,10 +74,21 @@ def won_lost_by_owner(ledger_df, week_labels):
         }
     return result
 
-def build_owner_report_rows(weighted_full, weighted_eoy, won, lost, won_cnt, lost_cnt, stage_order, annual_goal):
+def build_owner_report_rows(weighted_full, weighted_eoy, won, lost, won_cnt, lost_cnt, stage_order, annual_goal,
+                             baseline_won=0.0, baseline_lost=0.0, baseline_won_cnt=0, baseline_lost_cnt=0,
+                             week_offset=0):
+    """
+    baseline_* = kumulativní součty ZA VŠECHNY týdny PŘED prvním zobrazeným
+    sloupcem (mimo DISPLAY_WEEKS okno) - aby "Won (kumulativně)", "Win rate"
+    a "Prům. velikost dealu" odrážely celou historii, ne jen to, co je
+    momentálně vidět v tabulce.
+    week_offset = kolik týdnů uběhlo PŘED prvním zobrazeným sloupcem - aby
+    "Goal (kumulativně)" počítalo se skutečným číslem týdne od začátku roku,
+    ne s pořadím v rámci zobrazeného okna.
+    """
     n = len(won)
     rolling18 = [sum(weighted_full.get(s,[0]*n)[w] for s in stage_order) for w in range(n)]
-    wc = lc = 0; won_cum = []; lost_cum = []
+    wc = baseline_won; lc = baseline_lost; won_cum = []; lost_cum = []
     for w in range(n):
         wc += won[w]; lc += lost[w]; won_cum.append(wc); lost_cum.append(lc)
     # Pipeline till end of year = vážené stage hodnoty (do konce roku) + KUMULATIVNÍ
@@ -88,11 +99,11 @@ def build_owner_report_rows(weighted_full, weighted_eoy, won, lost, won_cnt, los
     # of year) - přesně dle původního vzorce '=C74-B74', kde řádek 74 = Rolling 18.
     changes = [rolling18[0]]+[rolling18[w]-rolling18[w-1] for w in range(1,n)]
     win_rate = [(won_cum[w]/(won_cum[w]+lost_cum[w])) if (won_cum[w]+lost_cum[w]) else 0.0 for w in range(n)]
-    cwc = clc = 0; avg_deal = []
+    cwc = baseline_won_cnt; clc = baseline_lost_cnt; avg_deal = []
     for w in range(n):
         cwc += won_cnt[w]; clc += lost_cnt[w]; d = cwc+clc
         avg_deal.append(((won_cum[w]+lost_cum[w])/d) if d else 0.0)
-    goal_cum = [round(annual_goal/52*(w+1)) for w in range(n)] if annual_goal else None
+    goal_cum = [round(annual_goal/52*(week_offset+w+1)) for w in range(n)] if annual_goal else None
     return {"stage_weighted": weighted_eoy, "annual_goal": annual_goal, "metrics": {
         "Won": won, "Lost": lost,
         "Pipeline till end of year": pipeline_eoy,
