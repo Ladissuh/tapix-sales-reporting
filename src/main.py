@@ -227,6 +227,34 @@ def fetch_and_persist(week_label, week_monday):
     pd.DataFrame(ledger_rows, columns=store.LEDGER_COLUMNS).to_csv(LEDGER_PATH, index=False)
     print(f"Ledger PŘEPSÁN čerstvými daty: {len(ledger_rows)} záznamů")
 
+def build_chart4_data(metrics_dict, week_nums, max_week, annual_goal):
+    """
+    Data pro graf 4 (Tempo k cíli) - osa X jsou weeknumy 1..max_week (celý
+    rok, ne jen zobrazené týdny). Skutečné metriky (Changes in Rolling 18,
+    Pipeline till end of year, Rolling 18, Won kumulativně) se vloží na
+    pozici odpovídající jejich reálnému číslu týdne, ostatní týdny (které
+    ještě nenastaly) zůstanou prázdné (graf je tam jednoduše nekreslí -
+    žádná fabrikovaná data). Goal je naopak lineární přímka po CELÝ rok
+    (annual_goal / max_week * týden), bez ohledu na to, kde jsme dnes.
+    """
+    if not annual_goal:
+        return None
+    def place(values):
+        arr = [None] * max_week
+        for wn, v in zip(week_nums, values):
+            if 1 <= wn <= max_week:
+                arr[wn - 1] = v
+        return arr
+    return {
+        "max_week": max_week,
+        "weeknums": list(range(1, max_week + 1)),
+        "changes_rolling18": place(metrics_dict["Changes in Rolling 18"]),
+        "pipeline_eoy": place(metrics_dict["Pipeline till end of year"]),
+        "rolling18": place(metrics_dict["Rolling 18"]),
+        "won_cum": place(metrics_dict["Won (kumulativně)"]),
+        "goal_line": [round(annual_goal / max_week * (i + 1)) for i in range(max_week)],
+    }
+
 def build_report(week_monday):
     name_map, goals, display_order, stage_probs, stage_order = load_config()
     snap   = store.load_or_empty(SNAPSHOTS_PATH, store.SNAPSHOTS_COLUMNS)
@@ -276,6 +304,11 @@ def build_report(week_monday):
         except KeyError:
             week_labels_display.append(w)
 
+    # Číslo týdne (ISO) pro každý zobrazený sloupec - pro řádek "Týden č."
+    # v tabulkách a pro osu X grafu 4 (tempo k cíli, po celý rok).
+    week_nums = [metrics.iso_weeknum(w) for w in week_labels]
+    max_week = metrics.weeks_in_iso_year(week_monday.year)
+
     eoy = date(week_monday.year + 1, 1, 1)
     if not snap.empty:
         parsed_dates = pd.to_datetime(snap["closedate"], errors="coerce", format="mixed", utc=True).dt.date
@@ -302,8 +335,10 @@ def build_report(week_monday):
         for _, row in odf.iterrows():
             try: cd = pd.to_datetime(row["closedate"]).date()
             except: cd = None
+            try: wn = metrics.iso_weeknum(row["close_week_label"])
+            except Exception: wn = ""
             rows.append([row["deal_id"], row["deal_name"], row["company_name"],
-                         row["owner_name"], cd, row["amount"], ""])
+                         row["owner_name"], cd, row["amount"], wn])
         return rows
 
     rb.build_ledger_sheet(wb, "Won",  ledger_rows_for("won"),  rb.GREEN)
@@ -320,16 +355,16 @@ def build_report(week_monday):
             baseline_won=baseline_won.get(owner, 0.0), baseline_lost=baseline_lost.get(owner, 0.0),
             baseline_won_cnt=baseline_won_cnt.get(owner, 0), baseline_lost_cnt=baseline_lost_cnt.get(owner, 0),
             week_offset=week_offset)
-        rows["raw_eoy"] = raw_eoy.get(owner, {s: z for s in stage_order})
         rows["raw_full"] = raw_full.get(owner, {s: z for s in stage_order})
-        rb.build_person_sheet(wb, owner, rows, stage_order, week_labels_display, week_labels_display)
+        rows["weighted_full"] = wf.get(owner, {s: z for s in stage_order})
+        rows["chart4"] = build_chart4_data(rows["metrics"], week_nums, max_week, goals.get(owner))
+        rb.build_person_sheet(wb, owner, rows, stage_order, week_labels_display, week_labels_display, week_nums)
         # Celkový Won (žebříček) = baseline (před oknem) + zobrazené týdny
         lb_totals[owner] = baseline_won.get(owner, 0.0) + sum(wl_o["won"])
 
     agg_wf = {s: [sum(wf.get(o,{}).get(s,z)[w] for o in owners) for w in range(len(week_labels))] for s in stage_order}
     agg_we = {s: [sum(we.get(o,{}).get(s,z)[w] for o in owners) for w in range(len(week_labels))] for s in stage_order}
     agg_raw_full = {s: [sum(raw_full.get(o,{}).get(s,z)[w] for o in owners) for w in range(len(week_labels))] for s in stage_order}
-    agg_raw_eoy  = {s: [sum(raw_eoy.get(o,{}).get(s,z)[w] for o in owners) for w in range(len(week_labels))] for s in stage_order}
     agg_won  = [sum(wl.get(o,{"won":  z})["won"][w]      for o in owners) for w in range(len(week_labels))]
     agg_lost = [sum(wl.get(o,{"lost": z})["lost"][w]     for o in owners) for w in range(len(week_labels))]
     agg_wc   = [sum(wl.get(o,{"won_cnt": z})["won_cnt"][w]   for o in owners) for w in range(len(week_labels))]
@@ -345,10 +380,11 @@ def build_report(week_monday):
         baseline_won=agg_baseline_won, baseline_lost=agg_baseline_lost,
         baseline_won_cnt=agg_baseline_won_cnt, baseline_lost_cnt=agg_baseline_lost_cnt,
         week_offset=week_offset)
-    agg_rows["raw_eoy"] = agg_raw_eoy
     agg_rows["raw_full"] = agg_raw_full
+    agg_rows["weighted_full"] = agg_wf
+    agg_rows["chart4"] = build_chart4_data(agg_rows["metrics"], week_nums, max_week, total_goal or None)
     rb.build_aggregation_sheet(wb, agg_rows, stage_order, week_labels_display, week_labels_display,
-                               sorted(lb_totals.items(), key=lambda x: -x[1]))
+                               sorted(lb_totals.items(), key=lambda x: -x[1]), week_nums)
 
     # --- DOČASNÉ debug listy - syrová (nevážená) data, pro ruční porovnání
     # se starými HubSpot_Deals_By_Stage_2026.xlsx / _DYNAMIC exporty.

@@ -23,6 +23,15 @@ def ordered_week_labels(df):
     tmp = tmp.copy(); tmp["week_monday"] = pd.to_datetime(tmp["week_monday"])
     return tmp.sort_values("week_monday")["week_label"].tolist()
 
+def iso_weeknum(week_label):
+    """Vytáhne ISO číslo týdne z 'YYYY-Wnn (mon—sun)' - stejné číslo, jaké
+    používal i původní excel (řádek 'Weeknum')."""
+    return int(week_label.split("-W")[1].split(" ")[0])
+
+def weeks_in_iso_year(year):
+    """Počet ISO týdnů v daném roce (obvykle 52, někdy 53)."""
+    return date(year, 12, 28).isocalendar()[1]
+
 def raw_amounts_by_owner(df, week_labels, stage_order):
     """
     STEJNÉ jako stage_weighted_amounts_by_owner, ale BEZ násobení
