@@ -1,9 +1,14 @@
+# Sledované fáze pipeline - TENHLE seznam je pod tvojí kontrolou.
+# main.py při každém běhu aktualizuje jen VÁHY (probability) živě z
+# HubSpotu pro fáze, které už tu jsou - nepřidává nic automaticky
+# (HubSpot má víc pipelines, a ne všechny fáze z nich chceme sledovat).
+#
+# Chceš přidat/odebrat fázi? Uprav stage_order i stages tady ručně.
 stages:
   "Lead Engaged": 0.01
   "Meeting negotiation / contacted": 0.01
   "Intro meeting agreed": 0.01
   "Awaiting confirmation / Not Now": 0.03
-  "Qualify": 0.09
   "Discover": 0.12
   "Validate": 0.20
   "Decide": 0.45
@@ -17,7 +22,6 @@ stage_order:
   - "Meeting negotiation / contacted"
   - "Intro meeting agreed"
   - "Awaiting confirmation / Not Now"
-  - "Qualify"
   - "Discover"
   - "Validate"
   - "Decide"

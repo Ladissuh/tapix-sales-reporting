@@ -52,41 +52,57 @@ def is_closed_lost(stage_id, stage_label, closed_lost_ids):
 
 def sync_stage_probabilities_from_hubspot(stage_label_map, stage_id_order, closed_ids, probability_map):
     """
-    Přepíše config/stage_probabilities.yaml aktuálním stavem z HubSpotu -
-    žádný ručně přepisovaný seznam fází, který se může časem rozejít se
-    skutečností (přejmenování fáze, jiná velikost písmen, mezery navíc...).
+    Aktualizuje VÁHY (probability) pro fáze, které už jsou v
+    config/stage_probabilities.yaml, přímo z HubSpotu - takže se sama
+    nikdy nerozjede se skutečností (přejmenování, jiné mezery...).
 
-    HubSpot je VŽDY autoritativní zdroj - jak seznam otevřených fází
-    (v pořadí, v jakém je má pipeline), tak jejich váha (probability).
-    Žádné "ruční přebití" se nezachovává, protože přesně tenhle mechanismus
-    (ručně přepsaná/zastaralá hodnota) byl příčinou nesrovnalostí, které
-    řešíme.
+    NEPŘIDÁVÁ nové fáze automaticky - seznam sledovaných fází (stage_order)
+    je pod tvojí kontrolou v configu. Pokud má HubSpot víc pipelines
+    (Sales, Upsell, ...), synchronizace by jinak natahala i fáze z
+    pipelines, které vůbec nesledujete. Chceš-li přidat/odebrat fázi,
+    uprav stage_order v config/stage_probabilities.yaml ručně.
     """
-    seen = set()
-    new_stage_order = []
-    new_stage_probs = {}
-    for sid in stage_id_order:
+    stage_yaml_path = CONFIG_DIR / "stage_probabilities.yaml"
+    with open(stage_yaml_path, encoding="utf-8") as f:
+        existing = yaml.safe_load(f) or {}
+    tracked_order = [s.strip() for s in existing.get("stage_order", [])]
+    tracked_probs = {k.strip(): v for k, v in (existing.get("stages", {}) or {}).items()}
+
+    # label -> nejaktuálnější probability z HubSpotu (napříč všemi pipelines,
+    # ať sedí bez ohledu na to, ve které pipeline se ta fáze skutečně nachází)
+    live_prob_by_label = {}
+    for sid, lbl in stage_label_map.items():
         if sid in closed_ids:
             continue
-        lbl = stage_label_map.get(sid, sid)
-        if lbl in seen:
-            continue
-        seen.add(lbl)
-        new_stage_order.append(lbl)
-        hubspot_prob = probability_map.get(sid)
-        if hubspot_prob is not None:
-            new_stage_probs[lbl] = round(hubspot_prob, 4)
+        p = probability_map.get(sid)
+        if p is not None:
+            live_prob_by_label[lbl] = round(p, 4)
+
+    new_stage_probs = {}
+    for lbl in tracked_order:
+        if lbl in live_prob_by_label:
+            new_stage_probs[lbl] = live_prob_by_label[lbl]
         else:
-            new_stage_probs[lbl] = DEFAULT_PROBABILITY
-            print(f"VAROVÁNÍ: fáze {repr(lbl)} nemá v HubSpotu nastavenou probability, "
-                  f"používám výchozí {DEFAULT_PROBABILITY}.")
+            # Fáze v configu, ale HubSpot ji teď nevrátil (přejmenovaná/smazaná?)
+            # - ponech poslední známou hodnotu a upozorni.
+            new_stage_probs[lbl] = tracked_probs.get(lbl, DEFAULT_PROBABILITY)
+            print(f"VAROVÁNÍ: fáze {repr(lbl)} je v config/stage_probabilities.yaml, "
+                  f"ale HubSpot ji teď nevrátil jako otevřenou - ponechávám poslední "
+                  f"známou váhu {new_stage_probs[lbl]}. Zkontroluj, jestli nebyla "
+                  f"v HubSpotu přejmenovaná nebo smazaná.")
 
-    print("Živé fáze z HubSpotu -> config/stage_probabilities.yaml:")
-    for lbl in new_stage_order:
-        print(f"  {repr(lbl)}: {new_stage_probs[lbl]}")
+    print("Sledované fáze (config/stage_probabilities.yaml) - váhy aktualizované z HubSpotu:")
+    for lbl in tracked_order:
+        changed = " (ZMĚNĚNO)" if tracked_probs.get(lbl) != new_stage_probs[lbl] else ""
+        print(f"  {repr(lbl)}: {new_stage_probs[lbl]}{changed}")
 
-    out = {"stages": new_stage_probs, "stage_order": new_stage_order}
-    stage_yaml_path = CONFIG_DIR / "stage_probabilities.yaml"
+    # Fáze, které HubSpot má a v configu NEJSOU - jen informativní log, nic se nemění.
+    untracked = sorted(set(live_prob_by_label) - set(tracked_order))
+    if untracked:
+        print(f"INFO: HubSpot má i tyhle otevřené fáze, které NEJSOU sledované "
+              f"(pravděpodobně jiná pipeline) - nic se s nimi nedělá: {untracked}")
+
+    out = {"stages": new_stage_probs, "stage_order": tracked_order}
     with open(stage_yaml_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(out, f, allow_unicode=True, sort_keys=False)
 
