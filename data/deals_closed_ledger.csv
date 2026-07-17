@@ -1,4 +1,5 @@
 deal_id,deal_name,company_name,owner_name,closedate,amount,outcome,week_label
+311509526760,NLB Bank GROUP (Tapix),NLB Group,Martin Korbelar,2026-01-29T14:19:23.103Z,300000.0,lost,2026-W05 (2026-01-26—2026-02-01)
 177539931352,Subscription: Soldo (Upsell),Soldo,Ivan Dovica,2026-07-14T11:05:15.229Z,25000.0,lost,2026-W29 (2026-07-13—2026-07-19)
 31881524471,National Bank of Kuwait - Sami (Tapix),National Bank of Kuwait,Oldřich Huzil,2026-05-13T14:00:08.293Z,125000.0,lost,2026-W20 (2026-05-11—2026-05-17)
 10429685209,Trinity Bank,TRINITY BANK a.s.,Martin Korbelar,2026-01-05T14:58:53.402Z,28000.0,lost,2026-W02 (2026-01-05—2026-01-11)
@@ -19,7 +20,6 @@ deal_id,deal_name,company_name,owner_name,closedate,amount,outcome,week_label
 360458783986,ATM Nearby: Axis Bank - New Deal (Tapix),Axis Bank,Oldřich Huzil,2026-07-16T12:36:10.921Z,15000.0,lost,2026-W29 (2026-07-13—2026-07-19)
 396380044523,"Mashreq Pakistan, Seamless Rijad 25",Mashreq,Oldřich Huzil,2026-07-16T11:19:12.904Z,100000.0,lost,2026-W29 (2026-07-13—2026-07-19)
 141989263567,"ING Belgium, woodpecker (Tapix)",ING Belgium,Veronika Kincová,2026-06-08T15:23:46.634Z,550000.0,won,2026-W24 (2026-06-08—2026-06-14)
-311509526760,NLB Bank GROUP (Tapix),NLB Group,Martin Korbelar,2026-01-29T14:19:23.103Z,300000.0,lost,2026-W05 (2026-01-26—2026-02-01)
 361253052612,ABS: HSBC - UK (Tapix),HSBC,Richard Brůža,2026-05-12T12:43:06.583Z,520000.0,lost,2026-W20 (2026-05-11—2026-05-17)
 460476222664,Al Barid Bank - from HPS,Al Barid Bank,Oldřich Huzil,2026-07-16T09:28:16.089Z,200000.0,lost,2026-W29 (2026-07-13—2026-07-19)
 501313743042,Standard Chartered Bank DXB - discovery,Standard Chartered Bank,Oldřich Huzil,2026-07-16T08:56:19.399Z,100000.0,lost,2026-W29 (2026-07-13—2026-07-19)
