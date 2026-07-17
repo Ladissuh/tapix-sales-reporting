@@ -132,5 +132,49 @@ def build_ledger_sheet(wb, title, rows, color):
     for ci,w in enumerate([10,26,16,14,13,14,9]): ws.column_dimensions[get_column_letter(1+ci)].width=w
     ws.freeze_panes="A5"; ws.sheet_view.showGridLines=False
 
+def build_raw_debug_sheet(wb, title, raw_by_owner, stage_order, week_labels_display, owners):
+    """
+    DOČASNÝ debug list - syrové (nevážené) částky owner x stage x týden,
+    přesně ve formátu, jak je stahovaly staré 2 skripty. Slouží jen
+    k ručnímu porovnání se starými HubSpot_Deals_By_Stage exporty -
+    až se ověří shoda, tenhle list zase klidně smažeme.
+    """
+    ws = wb.create_sheet(title[:31])
+    n = len(week_labels_display)
+    last_col = get_column_letter(1 + n)
+    _title(ws, f"DEBUG: {title}", "Dočasné - syrová data BEZ váhy, pro porovnání se starým systémem", last_col)
+
+    r = 4
+    for owner in owners:
+        c = ws.cell(r, 1, f"— {owner} —")
+        c.font = LF
+        c.fill = PatternFill("solid", fgColor=ACCENT_LIGHT)
+        r += 1
+        header_row = r
+        ws.cell(r, 1, "Stage").font = HF
+        ws.cell(r, 1).fill = HFill
+        for w, lbl in enumerate(week_labels_display):
+            cc = ws.cell(r, 2 + w, lbl)
+            cc.font = HF; cc.fill = HFill; cc.alignment = Alignment(horizontal="center")
+        r += 1
+        owner_data = raw_by_owner.get(owner, {})
+        for stage in stage_order:
+            ws.cell(r, 1, stage).font = CF
+            vals = owner_data.get(stage, [0] * n)
+            for w in range(n):
+                cc = ws.cell(r, 2 + w, vals[w])
+                cc.number_format = "#,##0"
+                cc.font = CF
+                cc.alignment = Alignment(horizontal="right")
+            r += 1
+        r += 1  # mezera mezi obchodníky
+
+    for ci in range(1, 2 + n):
+        ws.column_dimensions[get_column_letter(ci)].width = 13 if ci > 1 else 32
+    ws.freeze_panes = "B5"
+    ws.sheet_view.showGridLines = False
+    return ws
+
+
 def new_workbook():
     wb=Workbook(); wb.remove(wb.active); return wb

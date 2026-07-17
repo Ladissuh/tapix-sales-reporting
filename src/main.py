@@ -250,6 +250,8 @@ def build_report(week_monday):
 
     wf  = metrics.stage_weighted_amounts_by_owner(snap,     stage_probs, DEFAULT_PROBABILITY, week_labels, stage_order)
     we  = metrics.stage_weighted_amounts_by_owner(snap_eoy, stage_probs, DEFAULT_PROBABILITY, week_labels, stage_order)
+    raw_full = metrics.raw_amounts_by_owner(snap,     week_labels, stage_order)
+    raw_eoy  = metrics.raw_amounts_by_owner(snap_eoy, week_labels, stage_order)
     wl  = metrics.won_lost_by_owner(ledger, week_labels)
 
     owners = display_order
@@ -292,6 +294,14 @@ def build_report(week_monday):
         stage_order, total_goal or None)
     rb.build_aggregation_sheet(wb, agg_rows, stage_order, week_labels_display, week_labels_display,
                                sorted(lb_totals.items(), key=lambda x: -x[1]))
+
+    # --- DOČASNÉ debug listy - syrová (nevážená) data, pro ruční porovnání
+    # se starými HubSpot_Deals_By_Stage_2026.xlsx / _DYNAMIC exporty.
+    # Až se ověří shoda, klidně tenhle blok smaž (nebo dej vědět a smažu ho já).
+    rb.build_raw_debug_sheet(wb, "DEBUG Raw (do konce roku)", raw_eoy, stage_order,
+                             week_labels_display, owners)
+    rb.build_raw_debug_sheet(wb, "DEBUG Raw (Rolling 18)", raw_full, stage_order,
+                             week_labels_display, owners)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     out = OUTPUT_DIR / f"Sales_Reporting_{week_monday.year}.xlsx"

@@ -23,6 +23,25 @@ def ordered_week_labels(df):
     tmp = tmp.copy(); tmp["week_monday"] = pd.to_datetime(tmp["week_monday"])
     return tmp.sort_values("week_monday")["week_label"].tolist()
 
+def raw_amounts_by_owner(df, week_labels, stage_order):
+    """
+    STEJNÉ jako stage_weighted_amounts_by_owner, ale BEZ násobení
+    pravděpodobností - přesně to, co stahovaly staré 2 skripty do
+    HubSpot_Deals_By_Stage_2026.xlsx / _DYNAMIC. Slouží k debug porovnání.
+    """
+    result = {}
+    if df.empty: return result
+    grouped = df.groupby(["owner_name","stage_label","week_label"])["amount"].sum().reset_index()
+    for owner in sorted(grouped["owner_name"].unique()):
+        result[owner] = {}
+        odf = grouped[grouped["owner_name"] == owner]
+        for stage in stage_order:
+            sdf = odf[odf["stage_label"] == stage]
+            by_week = dict(zip(sdf["week_label"], sdf["amount"]))
+            result[owner][stage] = [round(by_week.get(w, 0.0)) for w in week_labels]
+    return result
+
+
 def stage_weighted_amounts_by_owner(df, stage_probs, default_prob, week_labels, stage_order):
     result = {}
     if df.empty: return result
