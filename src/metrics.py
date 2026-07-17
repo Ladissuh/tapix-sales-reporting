@@ -120,8 +120,9 @@ def build_owner_report_rows(weighted_full, weighted_eoy, won, lost, won_cnt, los
         "Changes in Rolling 18": changes_rolling18,
         "Changes in pipeline till end of the year": changes_eoy,
         "Rolling 18": rolling18,
-        "Win rate (kumul.)": win_rate,
-        "Prům. velikost dealu": avg_deal,
-        "Won (kumulativně)": won_cum,
-        "Goal (kumulativně)": goal_cum,
+        "Win rate (cumulative)": win_rate,
+        "Avg. deal size": avg_deal,
+        "Won (cumulative)": won_cum,
+        "Lost (cumulative)": lost_cum,
+        "Goal (cumulative)": goal_cum,
     }}

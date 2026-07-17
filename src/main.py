@@ -251,7 +251,7 @@ def build_chart4_data(metrics_dict, week_nums, max_week, annual_goal):
         "changes_rolling18": place(metrics_dict["Changes in Rolling 18"]),
         "pipeline_eoy": place(metrics_dict["Pipeline till end of year"]),
         "rolling18": place(metrics_dict["Rolling 18"]),
-        "won_cum": place(metrics_dict["Won (kumulativně)"]),
+        "won_cum": place(metrics_dict["Won (cumulative)"]),
         "goal_line": [round(annual_goal / max_week * (i + 1)) for i in range(max_week)],
     }
 
@@ -389,7 +389,7 @@ def build_report(week_monday):
     # --- DOČASNÉ debug listy - syrová (nevážená) data, pro ruční porovnání
     # se starými HubSpot_Deals_By_Stage_2026.xlsx / _DYNAMIC exporty.
     # Až se ověří shoda, klidně tenhle blok smaž (nebo dej vědět a smažu ho já).
-    rb.build_raw_debug_sheet(wb, "DEBUG Raw (do konce roku)", raw_eoy, stage_order,
+    rb.build_raw_debug_sheet(wb, "DEBUG Raw (till end of year)", raw_eoy, stage_order,
                              week_labels_display, owners)
     rb.build_raw_debug_sheet(wb, "DEBUG Raw (Rolling 18)", raw_full, stage_order,
                              week_labels_display, owners)

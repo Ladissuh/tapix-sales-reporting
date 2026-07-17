@@ -23,23 +23,25 @@ TFill=PatternFill("solid",fgColor=NAVY); HFill=PatternFill("solid",fgColor=ACCEN
 MFill=PatternFill("solid",fgColor=ACCENT_LIGHT); BFill=PatternFill("solid",fgColor=LIGHT_GREY)
 WFill=PatternFill("solid",fgColor=WEEKNUM_FILL)
 THIN=Side(style="thin",color="D0D3D8"); BDR=Border(left=THIN,right=THIN,top=THIN,bottom=THIN)
-PCT={"Win rate (kumul.)"}
+PCT={"Win rate (cumulative)"}
 STAGE_PALETTE=[ACCENT,GREEN,GOLD,PLUM,RED,"5B8FB0","8FA998","D0A85C","9A7BAD","C77B7B","4C6B8A","7BA88F"]
 MONEY_FMT='#,##0" Kč"'
 
 # ---------------------------------------------------------------------------
-# Pomocné funkce pro vzhled grafů - čitelnost os, ostré rohy, jednotné barvy,
-# jednotný styl titulků/legendy, bez zbytečného rámování.
+# Chart appearance helpers - readable axes, sharp corners, consistent
+# colors, consistent title/legend styling, no unnecessary borders.
 # ---------------------------------------------------------------------------
 
-def _rotate_x_labels(axis, degrees=-45):
-    """Natočí popisky osy X, ať je jasné, ke kterému týdnu/datu sloupec patří."""
-    bodyPr = RichTextProperties(rot=int(degrees*60000), vert="horz")
+def _hide_axis_labels(axis):
+    """Makes axis tick labels invisible (white-on-white) instead of removing
+    them outright - openpyxl's tickLblPos descriptor doesn't support the
+    'none' value, so this is the reliable way to hide them."""
     axis.txPr = RichText(
-        bodyPr=bodyPr,
-        p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=900,solidFill=MUTED)),
-                      endParaRPr=CharacterProperties(sz=900,solidFill=MUTED))],
+        bodyPr=RichTextProperties(),
+        p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=100,solidFill="FFFFFF")),
+                      endParaRPr=CharacterProperties(sz=100,solidFill="FFFFFF"))],
     )
+    axis.majorTickMark = "none"
 
 def _axis_label_style(axis, size=900, rotate=None):
     bodyPr = RichTextProperties(rot=int(rotate*60000)) if rotate is not None else RichTextProperties()
@@ -50,13 +52,13 @@ def _axis_label_style(axis, size=900, rotate=None):
     )
 
 def _thin_labels(axis, n_weeks, max_labels=16):
-    """Když je moc týdnů, nezobrazuj úplně každý popisek (jinak se slijou)."""
+    """When there are many weeks, don't show every single label (they'd overlap)."""
     if n_weeks > max_labels:
         axis.tickLblSkip = max(1, round(n_weeks / max_labels))
 
 def _sharp_lines(chart, width_pt=2.25):
-    """Vypne vyhlazení (smoothing) čárových grafů - ostré, ne zaoblené přechody,
-    a ztlustí čáru, ať je na první pohled dobře vidět."""
+    """Turns off smoothing on line charts - sharp, not rounded transitions,
+    and thickens the line so it's clearly visible."""
     for s in chart.series:
         s.smooth = False
         s.graphicalProperties.line.width = int(width_pt*12700)
@@ -70,7 +72,7 @@ def _set_title(ch, text, size=1400, color=NAVY):
         pass
 
 def _no_border(ch):
-    """Odstraní rámeček kolem celého grafu - čistší, 'plovoucí' vzhled."""
+    """Removes the border around the whole chart - cleaner, 'floating' look."""
     ch.graphical_properties = GraphicalProperties(ln=LineProperties(noFill=True))
 
 def _style_value_axis(ch, title=None, fmt=MONEY_FMT):
@@ -89,7 +91,7 @@ def _style_legend(ch, position="b", size=850):
     )
 
 def _finish(ch, n_weeks, title, y_title="Kč", legend=True, legend_pos="b", rotate_x=-45, thin_x=True):
-    """Společný závěrečný 'polish' krok - volá se na konci každého grafu."""
+    """Shared final 'polish' step - called at the end of every chart."""
     _set_title(ch, title)
     _axis_label_style(ch.x_axis, rotate=rotate_x)
     if thin_x: _thin_labels(ch.x_axis, n_weeks)
@@ -111,14 +113,14 @@ def _title(ws, title, subtitle, last_col):
 
 def write_table(ws, start_row, week_labels_display, week_nums, stage_order, stage_data, metrics_order, metrics):
     n = len(week_labels_display); r = start_row; header_row = r
-    ws.cell(r,1,"Stage / Metrika").font=HF; ws.cell(r,1).fill=HFill; ws.cell(r,1).border=BDR
+    ws.cell(r,1,"Date").font=HF; ws.cell(r,1).fill=HFill; ws.cell(r,1).border=BDR
     for w,lbl in enumerate(week_labels_display):
         c=ws.cell(r,2+w,lbl); c.font=HF; c.fill=HFill; c.alignment=Alignment(horizontal="center"); c.border=BDR
     r += 1
-    # Řádek s číslem týdne (ISO Weeknum) - hned pod datem, ať je jasné,
-    # o který týden v roce jde (stejné číslování jako v původním excelu).
+    # Week number (ISO) row - right under the date, so it's clear which
+    # week of the year this is (same numbering as the original excel).
     weeknum_row = r
-    ws.cell(r,1,"Týden č.").font=WF; ws.cell(r,1).fill=WFill; ws.cell(r,1).border=BDR
+    ws.cell(r,1,"Week #").font=WF; ws.cell(r,1).fill=WFill; ws.cell(r,1).border=BDR
     for w,wn in enumerate(week_nums):
         c=ws.cell(r,2+w,wn); c.font=WF; c.fill=WFill; c.alignment=Alignment(horizontal="center"); c.border=BDR
     r += 1
@@ -144,10 +146,10 @@ def write_table(ws, start_row, week_labels_display, week_nums, stage_order, stag
 
 def write_hidden_block(ws, start_row, n_cols, row_specs):
     """
-    Obecná pomocná funkce - zapíše libovolné číselné řady do skrytých
-    řádků (slouží jako zdroj dat pro grafy, aniž by to uživatel v Excelu
-    viděl). row_specs = list of (label, values[n_cols]).
-    Vrací {label: row_index}, next_free_row.
+    Generic helper - writes arbitrary numeric series into hidden rows
+    (used as a chart data source without the user seeing it in Excel).
+    row_specs = list of (label, values[n_cols]).
+    Returns {label: row_index}, next_free_row.
     """
     r = start_row; rows = {}
     for label, values in row_specs:
@@ -161,28 +163,29 @@ def write_hidden_block(ws, start_row, n_cols, row_specs):
     return rows, r
 
 def write_raw_block(ws, start_row, n_weeks, stage_order, stage_data):
-    """Skryté řádky se stage x týden hodnotami (raw nebo vážené - podle
-    toho, co se do stage_data předá). Používá se jako zdroj dat pro
-    funnel grafy."""
-    specs = [(f"[data] {stage}", stage_data.get(stage,[0]*n_weeks)) for stage in stage_order]
+    """Hidden rows with stage x week values (raw or weighted - depending on
+    what's passed in stage_data). Used as the data source for funnel
+    charts. Plain stage names (no prefix), so chart legends/labels stay clean."""
+    specs = [(stage, stage_data.get(stage,[0]*n_weeks)) for stage in stage_order]
     rows, next_r = write_hidden_block(ws, start_row, n_weeks, specs)
-    return {stage: rows[f"[data] {stage}"] for stage in stage_order}, next_r
+    return rows, next_r
 
 def write_chart4_block(ws, start_row, chart4_data):
     """
-    Skryté řádky pro graf 4 (Tempo k cíli) - osa X jde přes CELÝ rok
-    (weeknum 1..max_week), ne jen zobrazené týdny. Skutečné metriky mají
-    hodnotu jen u týdnů, které už nastaly (jinde None -> graf tam prostě
-    nekreslí, žádná fabrikovaná data). Goal je lineární přímka po celý rok.
+    Hidden rows for chart 4 (Pace to goal) - the X axis spans the WHOLE
+    YEAR (week 1..max_week), not just the displayed weeks. Actual metrics
+    only have a value for weeks that already happened (elsewhere None ->
+    the chart simply doesn't draw there, no fabricated data). Goal is a
+    linear line for the whole year.
     """
     n = chart4_data["max_week"]
     specs = [
-        ("Weeknum", chart4_data["weeknums"]),
-        ("Změna Rolling 18 (týdně)", chart4_data["changes_rolling18"]),
+        ("Week", chart4_data["weeknums"]),
+        ("Change in Rolling 18 (weekly)", chart4_data["changes_rolling18"]),
         ("Pipeline till end of year", chart4_data["pipeline_eoy"]),
         ("Rolling 18", chart4_data["rolling18"]),
-        ("Won (kumulativně)", chart4_data["won_cum"]),
-        ("Goal (lineárně, celý rok)", chart4_data["goal_line"]),
+        ("Won (cumulative)", chart4_data["won_cum"]),
+        ("Goal (linear, full year)", chart4_data["goal_line"]),
     ]
     rows, next_r = write_hidden_block(ws, start_row, n, specs)
     return rows, next_r, n
@@ -216,9 +219,25 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
         ch.series[0].graphicalProperties.line.noFill=True
         return _finish(ch, n_weeks, title, y, legend=False)
 
+    def stacked_won_lost():
+        # Cumulative (stacked) Won vs. Lost - better conveys the overall
+        # split of closed pipeline over time than a weekly line.
+        ch=BarChart(); ch.type="col"; ch.grouping="stacked"; ch.overlap=100; ch.height=10.5; ch.width=27
+        for lbl,color in [("Won (cumulative)",GREEN),("Lost (cumulative)",RED)]:
+            if lbl not in metric_rows: continue
+            d=Reference(ws,min_col=1,max_col=mc,min_row=metric_rows[lbl],max_row=metric_rows[lbl])
+            ch.add_data(d,titles_from_data=True,from_rows=True)
+        ch.set_categories(cats)
+        for s,color in zip(ch.series, [GREEN,RED]):
+            s.graphicalProperties.solidFill = color
+            s.graphicalProperties.line.noFill = True
+        return _finish(ch, n_weeks, "Won vs. Lost (cumulative)", "Kč", legend=True)
+
     def funnel_current():
-        # Aktuální rozpad pipeline (poslední týden) - SKUTEČNÉ (nevážené)
-        # hodnoty, na základě Rolling 18 datasetu (ne "do konce roku").
+        # Current pipeline breakdown (latest week) - ACTUAL (unweighted)
+        # values, based on the Rolling 18 dataset (not "till end of year").
+        # Left-to-right, first-stage-on-top, labelled directly on the bars
+        # (no separate axis labels, no "[data]"/series-name clutter).
         ch=BarChart(); ch.type="bar"; ch.height=10.5; ch.width=27
         lc=1+n_weeks
         min_r, max_r = min(raw_full_rows.values()), max(raw_full_rows.values())
@@ -227,19 +246,30 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
         ch.add_data(d,titles_from_data=False); ch.set_categories(cs)
         ch.series[0].graphicalProperties.solidFill=GREEN
         ch.series[0].graphicalProperties.line.noFill=True
-        ch.dataLabels=DataLabelList(); ch.dataLabels.showVal=True; ch.dataLabels.numFmt='#,##0" Kč"'
+        ch.dataLabels=DataLabelList()
+        ch.dataLabels.showVal=True; ch.dataLabels.showCatName=True
+        ch.dataLabels.showSerName=False; ch.dataLabels.showLegendKey=False
+        ch.dataLabels.showPercent=False; ch.dataLabels.showBubbleSize=False
+        ch.dataLabels.separator=": "
+        ch.dataLabels.numFmt='#,##0" Kč"'
         ch.dataLabels.txPr = RichText(bodyPr=RichTextProperties(),
             p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=850,b=True,solidFill=NAVY)), endParaRPr=None)])
-        # Fáze na začátku funnelu (Lead Engaged...) nahoru, ne na spodek.
-        ch.y_axis.scaling.orientation = "maxMin"
+        # First pipeline stage (Lead Engaged...) on top, not at the bottom.
+        ch.x_axis.scaling.orientation = "maxMin"
+        # Keep the value axis normal (0 on the left, ascending to the right).
+        ch.y_axis.scaling.orientation = "minMax"
+        ch.y_axis.crosses = "min"
         sfx=f" ({last_week_lbl})" if last_week_lbl else ""
-        ch = _finish(ch, n_weeks, f"Funnel – rozpad pipeline, Rolling 18{sfx}", "Kč", legend=False)
+        ch = _finish(ch, n_weeks, f"Funnel – pipeline breakdown, Rolling 18{sfx}", "Kč", legend=False)
         ch.x_axis.title = None
+        # Data labels on each bar already carry the stage name - hide the
+        # separate axis tick labels to avoid duplicate/rotated clutter.
+        _hide_axis_labels(ch.x_axis)
         return ch
 
     def funnel_evolution(title, rows_dict, color_offset=0):
-        # Skládaný sloupcový graf: vývoj funnelu VÁŽENÝCH hodnot v čase,
-        # po týdnech, od začátku roku - jedna série na fázi.
+        # Stacked column chart: evolution of the WEIGHTED funnel over time,
+        # week by week, from the start of the year - one series per stage.
         ch=BarChart(); ch.type="col"; ch.grouping="stacked"; ch.overlap=100; ch.height=11; ch.width=27
         d=Reference(ws,min_col=1,max_col=mc,min_row=min(rows_dict.values()),max_row=max(rows_dict.values()))
         ch.add_data(d,titles_from_data=True,from_rows=True); ch.set_categories(cats)
@@ -250,26 +280,26 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
         return _finish(ch, n_weeks, title, "Kč", legend=True)
 
     def combo_tempo():
-        # "Tempo k cíli" - osa X je CELÝ ROK (weeknum 1..max_week), ne jen
-        # zobrazené týdny. Sloupce = týdenní změna Rolling 18 (vedlejší
-        # osa), čáry = Pipeline do konce roku, Rolling 18, Won kumulativně
-        # (hlavní osa, jen tam, kde už data reálně jsou), a lineární Goal
-        # přímka po celý rok (annual_goal / 52 týdnů).
+        # "Pace to goal" - the X axis spans the WHOLE YEAR (week 1..max_week),
+        # not just the displayed weeks. Columns = weekly change in Rolling 18
+        # (secondary axis), lines = Pipeline till end of year, Rolling 18,
+        # Won cumulative (primary axis, only where data actually exists), and
+        # a linear Goal line for the whole year (annual_goal / weeks in year).
         if not chart4_rows: return None
         n4 = chart4_n; mc4 = 1+n4
-        cats4 = Reference(ws,min_col=2,max_col=mc4,min_row=chart4_rows["Weeknum"],max_row=chart4_rows["Weeknum"])
+        cats4 = Reference(ws,min_col=2,max_col=mc4,min_row=chart4_rows["Week"],max_row=chart4_rows["Week"])
 
         bar_ch=BarChart(); bar_ch.type="col"
-        d=Reference(ws,min_col=1,max_col=mc4,min_row=chart4_rows["Změna Rolling 18 (týdně)"],max_row=chart4_rows["Změna Rolling 18 (týdně)"])
+        d=Reference(ws,min_col=1,max_col=mc4,min_row=chart4_rows["Change in Rolling 18 (weekly)"],max_row=chart4_rows["Change in Rolling 18 (weekly)"])
         bar_ch.add_data(d,titles_from_data=True,from_rows=True); bar_ch.set_categories(cats4)
         bar_ch.series[0].graphicalProperties.solidFill=ACCENT_LIGHT
         bar_ch.series[0].graphicalProperties.line.solidFill=ACCENT
-        bar_ch.y_axis.axId=200; bar_ch.y_axis.title="Týdenní změna (Kč)"; bar_ch.y_axis.crosses="max"
+        bar_ch.y_axis.axId=200; bar_ch.y_axis.title="Weekly change (Kč)"; bar_ch.y_axis.crosses="max"
         bar_ch.y_axis.numFmt=MONEY_FMT; _axis_label_style(bar_ch.y_axis)
         bar_ch.y_axis.majorGridlines=None
 
         line_ch=LineChart()
-        series_specs=[("Pipeline till end of year",GOLD),("Rolling 18",ACCENT),("Won (kumulativně)",GREEN)]
+        series_specs=[("Pipeline till end of year",GOLD),("Rolling 18",ACCENT),("Won (cumulative)",GREEN)]
         for name,color in series_specs:
             dd=Reference(ws,min_col=1,max_col=mc4,min_row=chart4_rows[name],max_row=chart4_rows[name])
             line_ch.add_data(dd,titles_from_data=True,from_rows=True)
@@ -277,9 +307,9 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
             s.graphicalProperties.line.solidFill = color
             s.marker = Marker(symbol="circle", size=5)
             s.marker.graphicalProperties = GraphicalProperties(solidFill=color, ln=LineProperties(solidFill=color))
-        # Goal - samostatná lineární přímka po celý rok, bez značek, čárkovaně,
-        # ať je vizuálně jasné, že jde o CÍL, ne o naměřenou hodnotu.
-        goal_d=Reference(ws,min_col=1,max_col=mc4,min_row=chart4_rows["Goal (lineárně, celý rok)"],max_row=chart4_rows["Goal (lineárně, celý rok)"])
+        # Goal - a standalone linear line for the whole year, no markers,
+        # dashed, so it's visually clear this is a TARGET, not a measurement.
+        goal_d=Reference(ws,min_col=1,max_col=mc4,min_row=chart4_rows["Goal (linear, full year)"],max_row=chart4_rows["Goal (linear, full year)"])
         line_ch.add_data(goal_d,titles_from_data=True,from_rows=True)
         goal_series = line_ch.series[-1]
         goal_series.graphicalProperties.line.solidFill = OLIVE
@@ -287,25 +317,27 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
         goal_series.marker = Marker(symbol="none")
         line_ch.set_categories(cats4)
         _sharp_lines(line_ch)
-        line_ch.y_axis.axId=100; line_ch.y_axis.title="Kumulativní hodnota (Kč)"
+        line_ch.y_axis.axId=100; line_ch.y_axis.title="Cumulative value (Kč)"
         line_ch.y_axis.numFmt=MONEY_FMT; _axis_label_style(line_ch.y_axis)
         if line_ch.y_axis.majorGridlines is not None:
             line_ch.y_axis.majorGridlines.spPr = GraphicalProperties(ln=LineProperties(solidFill=GRID, w=6350))
 
         bar_ch += line_ch
-        bar_ch.height=10.5; bar_ch.width=27
-        ch = _finish(bar_ch, n4, "Tempo k cíli – pipeline, Rolling 18, Won a Goal po celý rok",
+        # Taller than the others, so smaller differences (e.g. in Won) are
+        # easier to see across the full-year Y axis range.
+        bar_ch.height=15; bar_ch.width=27
+        ch = _finish(bar_ch, n4, "Pace to goal – pipeline, Rolling 18, Won and Goal for the full year",
                      y_title=None, legend=True, thin_x=True)
         ch.y_axis.numFmt=MONEY_FMT
         return ch
 
     charts=[
-        bar("Týdenní změna Rolling 18","Changes in Rolling 18", color=ACCENT),
-        line("Won vs. Lost (týdně)", [("Won",GREEN),("Lost",RED)]),
+        bar("Weekly change in Rolling 18","Changes in Rolling 18", color=ACCENT),
+        stacked_won_lost(),
         funnel_current(),
         combo_tempo(),
-        funnel_evolution("Vývoj funnelu v čase – do konce roku (vážené hodnoty)", weighted_eoy_rows),
-        funnel_evolution("Vývoj funnelu v čase – Rolling 18 (vážené hodnoty)", weighted_full_rows, color_offset=3),
+        funnel_evolution("Funnel evolution over time – till end of year (weighted values)", weighted_eoy_rows),
+        funnel_evolution("Funnel evolution over time – Rolling 18 (weighted values)", weighted_full_rows, color_offset=3),
     ]
     r=anchor_row
     for ch in charts:
@@ -316,13 +348,13 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
 
 METRICS_ORDER=["Won","Lost","Pipeline till end of year","Changes in pipeline till end of the year",
                "Rolling 18","Changes in Rolling 18",
-               "Win rate (kumul.)","Prům. velikost dealu","Won (kumulativně)","Goal (kumulativně)"]
+               "Win rate (cumulative)","Avg. deal size","Won (cumulative)","Lost (cumulative)","Goal (cumulative)"]
 
 def build_person_sheet(wb, owner, sheet_data, stage_order, week_labels_display, week_dates_for_title, week_nums):
     ws=wb.create_sheet(owner[:31]); n=len(week_labels_display); lc=get_column_letter(1+n)
     goal=sheet_data.get("annual_goal")
-    goal_txt=f"Roční cíl: {goal:,.0f} Kč".replace(",","_").replace("_"," ") if goal else "Roční cíl: zatím nestanoven"
-    _title(ws,f"{owner} — Sales Pipeline Report",f"Týdenní přehled pipeline, Kč  ·  {goal_txt}",lc)
+    goal_txt=f"Annual goal: {goal:,.0f} Kč".replace(",","_").replace("_"," ") if goal else "Annual goal: not yet set"
+    _title(ws,f"{owner} — Sales Pipeline Report",f"Weekly pipeline overview, Kč  ·  {goal_txt}",lc)
     hr,wnr,sr,mr,er=write_table(ws,4,week_labels_display,week_nums,stage_order,sheet_data["stage_weighted"],METRICS_ORDER,sheet_data["metrics"])
     raw_full_rows, er2 = write_raw_block(ws, er, n, stage_order, sheet_data.get("raw_full", {}))
     weighted_full_rows, er3 = write_raw_block(ws, er2, n, stage_order, sheet_data.get("weighted_full", {}))
@@ -334,7 +366,7 @@ def build_person_sheet(wb, owner, sheet_data, stage_order, week_labels_display, 
 
 def build_aggregation_sheet(wb, agg_data, stage_order, week_labels_display, week_dates_for_title, leaderboard, week_nums):
     ws=wb.create_sheet("Aggregation"); n=len(week_labels_display); lc=get_column_letter(1+n)
-    _title(ws,"Tapix — Agregovaný Sales Pipeline Report","Všichni obchodníci součtem, Kč",lc)
+    _title(ws,"Tapix — Aggregated Sales Pipeline Report","All sales reps combined, Kč",lc)
     hr,wnr,sr,mr,er=write_table(ws,4,week_labels_display,week_nums,stage_order,agg_data["stage_weighted"],METRICS_ORDER,agg_data["metrics"])
     raw_full_rows, er2 = write_raw_block(ws, er, n, stage_order, agg_data.get("raw_full", {}))
     weighted_full_rows, er3 = write_raw_block(ws, er2, n, stage_order, agg_data.get("weighted_full", {}))
@@ -342,9 +374,9 @@ def build_aggregation_sheet(wb, agg_data, stage_order, week_labels_display, week
     if agg_data.get("chart4"):
         chart4_rows, er4, chart4_n = write_chart4_block(ws, er3, agg_data["chart4"])
     end=_add_charts(ws,er4+2,hr,mr,sr,raw_full_rows,weighted_full_rows,n,stage_order,week_dates_for_title,chart4_rows,chart4_n)
-    lb=end+2; ws.cell(lb,1,"Žebříček obchodníků (Won celkem)").font=LF; lb+=1
-    ws.cell(lb,1,"Obchodník").font=HF; ws.cell(lb,1).fill=HFill
-    ws.cell(lb,2,"Won celkem (Kč)").font=HF; ws.cell(lb,2).fill=HFill
+    lb=end+2; ws.cell(lb,1,"Sales rep leaderboard (Total Won)").font=LF; lb+=1
+    ws.cell(lb,1,"Sales rep").font=HF; ws.cell(lb,1).fill=HFill
+    ws.cell(lb,2,"Total Won (Kč)").font=HF; ws.cell(lb,2).fill=HFill
     lbh=lb; lb+=1; lbf=lb
     for name,total in leaderboard:
         ws.cell(lb,1,name).font=CF
@@ -358,14 +390,14 @@ def build_aggregation_sheet(wb, agg_data, stage_order, week_labels_display, week
     ch.series[0].graphicalProperties.line.noFill=True
     ch.dataLabels=DataLabelList(); ch.dataLabels.showVal=True; ch.dataLabels.numFmt=MONEY_FMT
     ch.y_axis.scaling.orientation="maxMin"
-    ch = _finish(ch, len(leaderboard) or 1, "Žebříček obchodníků podle celkového Won", "Kč", legend=False)
+    ch = _finish(ch, len(leaderboard) or 1, "Sales rep leaderboard by total Won", "Kč", legend=False)
     ws.add_chart(ch,f"D{lbh}"); ws.freeze_panes="B5"; ws.sheet_view.showGridLines=False
     ws.column_dimensions["A"].width=30
 
 def build_ledger_sheet(wb, title, rows, color):
     ws=wb.create_sheet(title)
-    _title(ws,f"{title} Deals — automatický ledger","Generováno týdně z HubSpotu","G")
-    headers=["Deal ID","Deal Name","Company","Deal Owner","Close Date","Amount (Kč)","Týden č. (Weeknum)"]
+    _title(ws,f"{title} Deals — automatic ledger","Generated weekly from HubSpot","G")
+    headers=["Deal ID","Deal Name","Company","Deal Owner","Close Date","Amount (Kč)","Week #"]
     r=4
     for ci,h in enumerate(headers):
         c=ws.cell(r,1+ci,h); c.font=HF; c.fill=PatternFill("solid",fgColor=color); c.border=BDR
@@ -377,14 +409,14 @@ def build_ledger_sheet(wb, title, rows, color):
             if ci==5: c.number_format="#,##0"
             if ci==6: c.alignment=Alignment(horizontal="center")
         r+=1
-    for ci,w in enumerate([10,26,16,14,13,14,16]): ws.column_dimensions[get_column_letter(1+ci)].width=w
+    for ci,w in enumerate([10,26,16,14,13,14,10]): ws.column_dimensions[get_column_letter(1+ci)].width=w
     ws.freeze_panes="A5"; ws.sheet_view.showGridLines=False
 
 def build_raw_debug_sheet(wb, title, raw_by_owner, stage_order, week_labels_display, owners):
     ws = wb.create_sheet(title[:31])
     n = len(week_labels_display)
     last_col = get_column_letter(1 + n)
-    _title(ws, f"DEBUG: {title}", "Dočasné - syrová data BEZ váhy, pro porovnání se starým systémem", last_col)
+    _title(ws, f"DEBUG: {title}", "Temporary - raw unweighted data, for comparison with the old system", last_col)
 
     r = 4
     for owner in owners:
