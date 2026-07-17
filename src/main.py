@@ -320,12 +320,16 @@ def build_report(week_monday):
             baseline_won=baseline_won.get(owner, 0.0), baseline_lost=baseline_lost.get(owner, 0.0),
             baseline_won_cnt=baseline_won_cnt.get(owner, 0), baseline_lost_cnt=baseline_lost_cnt.get(owner, 0),
             week_offset=week_offset)
+        rows["raw_eoy"] = raw_eoy.get(owner, {s: z for s in stage_order})
+        rows["raw_full"] = raw_full.get(owner, {s: z for s in stage_order})
         rb.build_person_sheet(wb, owner, rows, stage_order, week_labels_display, week_labels_display)
         # Celkový Won (žebříček) = baseline (před oknem) + zobrazené týdny
         lb_totals[owner] = baseline_won.get(owner, 0.0) + sum(wl_o["won"])
 
     agg_wf = {s: [sum(wf.get(o,{}).get(s,z)[w] for o in owners) for w in range(len(week_labels))] for s in stage_order}
     agg_we = {s: [sum(we.get(o,{}).get(s,z)[w] for o in owners) for w in range(len(week_labels))] for s in stage_order}
+    agg_raw_full = {s: [sum(raw_full.get(o,{}).get(s,z)[w] for o in owners) for w in range(len(week_labels))] for s in stage_order}
+    agg_raw_eoy  = {s: [sum(raw_eoy.get(o,{}).get(s,z)[w] for o in owners) for w in range(len(week_labels))] for s in stage_order}
     agg_won  = [sum(wl.get(o,{"won":  z})["won"][w]      for o in owners) for w in range(len(week_labels))]
     agg_lost = [sum(wl.get(o,{"lost": z})["lost"][w]     for o in owners) for w in range(len(week_labels))]
     agg_wc   = [sum(wl.get(o,{"won_cnt": z})["won_cnt"][w]   for o in owners) for w in range(len(week_labels))]
@@ -341,6 +345,8 @@ def build_report(week_monday):
         baseline_won=agg_baseline_won, baseline_lost=agg_baseline_lost,
         baseline_won_cnt=agg_baseline_won_cnt, baseline_lost_cnt=agg_baseline_lost_cnt,
         week_offset=week_offset)
+    agg_rows["raw_eoy"] = agg_raw_eoy
+    agg_rows["raw_full"] = agg_raw_full
     rb.build_aggregation_sheet(wb, agg_rows, stage_order, week_labels_display, week_labels_display,
                                sorted(lb_totals.items(), key=lambda x: -x[1]))
 

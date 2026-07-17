@@ -95,9 +95,10 @@ def build_owner_report_rows(weighted_full, weighted_eoy, won, lost, won_cnt, los
     # Won od začátku roku (ne jen týdenní Won) - přesně dle původního vzorce
     # '=(SUM(B55:B65,B67,B70))', kde B67 = "Won stacked" (kumulativní).
     pipeline_eoy = [sum(weighted_eoy.get(s,[0]*n)[w] for s in stage_order)+won_cum[w] for w in range(n)]
-    # Changes in pipeline = mezitýdenní delta ROLLING 18 (ne Pipeline till end
+    # Changes in Rolling 18 = mezitýdenní delta ROLLING 18 (ne Pipeline till end
     # of year) - přesně dle původního vzorce '=C74-B74', kde řádek 74 = Rolling 18.
-    changes = [rolling18[0]]+[rolling18[w]-rolling18[w-1] for w in range(1,n)]
+    changes_rolling18 = [rolling18[0]]+[rolling18[w]-rolling18[w-1] for w in range(1,n)]
+    changes_eoy = [pipeline_eoy[0]]+[pipeline_eoy[w]-pipeline_eoy[w-1] for w in range(1,n)]
     win_rate = [(won_cum[w]/(won_cum[w]+lost_cum[w])) if (won_cum[w]+lost_cum[w]) else 0.0 for w in range(n)]
     cwc = baseline_won_cnt; clc = baseline_lost_cnt; avg_deal = []
     for w in range(n):
@@ -107,7 +108,8 @@ def build_owner_report_rows(weighted_full, weighted_eoy, won, lost, won_cnt, los
     return {"stage_weighted": weighted_eoy, "annual_goal": annual_goal, "metrics": {
         "Won": won, "Lost": lost,
         "Pipeline till end of year": pipeline_eoy,
-        "Changes in pipeline": changes,
+        "Changes in Rolling 18": changes_rolling18,
+        "Changes in pipeline till end of the year": changes_eoy,
         "Rolling 18": rolling18,
         "Win rate (kumul.)": win_rate,
         "Prům. velikost dealu": avg_deal,
