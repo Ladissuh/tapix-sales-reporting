@@ -4,7 +4,6 @@ import sys
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import pandas as pd, yaml
-from dateutil.relativedelta import relativedelta
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -23,7 +22,9 @@ SNAPSHOTS_PATH = DATA_DIR / "deals_snapshots.csv"
 LEDGER_PATH    = DATA_DIR / "deals_closed_ledger.csv"
 DEFAULT_PROBABILITY = 0.5
 
-# Stage labely které považujeme za uzavřené (záloha pokud probability metadata chybí)
+# Won/Lost se stahují jen od tohoto data (closedate >= tento epoch) - 2026-01-01 00:00 UTC
+LEDGER_SINCE_EPOCH_MS = 1767225600000
+
 CLOSED_WON_LABELS  = {"closed won", "won", "closed"}
 CLOSED_LOST_LABELS = {"closed lost", "lost", "lost (tapix)"}
 
@@ -41,53 +42,60 @@ def load_config():
     return name_map, goals, display_order, stage_probs, stage_order
 
 def is_closed_won(stage_id, stage_label, closed_won_ids):
-    if stage_id in closed_won_ids:
-        return True
+    if stage_id in closed_won_ids: return True
     return (stage_label or "").strip().lower() in CLOSED_WON_LABELS
 
 def is_closed_lost(stage_id, stage_label, closed_lost_ids):
-    if stage_id in closed_lost_ids:
-        return True
+    if stage_id in closed_lost_ids: return True
     return (stage_label or "").strip().lower() in CLOSED_LOST_LABELS
 
 def fetch_and_persist(week_label, week_monday):
     token = hs.load_token()
     owners_map = hs.get_all_owners(token)
     stage_label_map, _, closed_won_ids, closed_lost_ids = hs.get_stage_metadata(token)
+    closed_ids = closed_won_ids | closed_lost_ids
 
-    print(f"Closed Won stage IDs: {closed_won_ids}")
+    print(f"Closed Won stage IDs:  {closed_won_ids}")
     print(f"Closed Lost stage IDs: {closed_lost_ids}")
+    if not closed_ids:
+        print("VAROVÁNÍ: HubSpot nevrátil žádné stage s probability 0.0/1.0 - "
+              "roztřídění poběží jen podle stage labelu (viz CLOSED_WON_LABELS/CLOSED_LOST_LABELS).")
 
-    cutoff_local = datetime.combine(week_monday, datetime.min.time()).replace(
-        tzinfo=ZoneInfo(LOCAL_TZ)) + timedelta(days=6) + relativedelta(months=+18)
-    cutoff_ms = int(cutoff_local.timestamp() * 1000)
-    deals = hs.fetch_deals(token, cutoff_ms)
-    print(f"Staženo celkem {len(deals)} dealů.")
+    # --- Otevřené dealy: BEZ filtru na closedate ---
+    open_deals_raw = hs.fetch_open_deals(token, closed_ids)
+    print(f"Staženo otevřených dealů (raw): {len(open_deals_raw)}")
 
-    open_deals, closed_deals = [], []
-    for d in deals:
-        p   = d.get("properties") or {}
-        sid = p.get("dealstage")
-        lbl = stage_label_map.get(sid, "")
+    # Pojistka + doplňkové třídění podle labelu, kdyby NOT_IN filtr něco propustil
+    open_deals = []
+    for d in open_deals_raw:
+        p = d.get("properties") or {}
+        sid, lbl = p.get("dealstage"), stage_label_map.get(p.get("dealstage"), "")
         if is_closed_won(sid, lbl, closed_won_ids) or is_closed_lost(sid, lbl, closed_lost_ids):
-            closed_deals.append(d)
-        else:
-            open_deals.append(d)
+            continue
+        open_deals.append(d)
+    print(f"Otevřené dealy po dočištění: {len(open_deals)}")
 
-    print(f"  Otevřené dealy (půjdou do pipeline snapshotu): {len(open_deals)}")
-    print(f"  Uzavřené dealy (Won/Lost ledger):              {len(closed_deals)}")
-
-    # Debug: ukáž stage rozložení otevřených dealů
     from collections import Counter
-    stage_counts = Counter(stage_label_map.get((d.get("properties") or {}).get("dealstage"),"?") for d in open_deals)
-    print(f"  Stage breakdown: {dict(stage_counts)}")
+    stage_counts = Counter(stage_label_map.get((d.get("properties") or {}).get("dealstage"), "?") for d in open_deals)
+    print(f"Stage breakdown otevřených dealů: {dict(stage_counts)}")
 
-    # Batch company lookup pro uzavřené dealy
+    if not open_deals:
+        raise RuntimeError(
+            "BEZPEČNOSTNÍ POJISTKA: HubSpot vrátil 0 otevřených dealů pro tento týden. "
+            "To skoro jistě znamená chybu (špatný token/scope, chybná detekce closed "
+            "stage, nebo firma opravdu nemá žádnou otevřenou pipeline - nepravděpodobné). "
+            "Zastavuji běh, ať se do reportu nezapíšou falešné nuly. Zkontroluj log výše "
+            "(Stage breakdown, Closed Won/Lost stage IDs)."
+        )
+
+    # --- Won/Lost: živě z HubSpotu, closedate >= 1.1.2026, VŽDY čerstvé (žádné CSV) ---
+    closed_deals = hs.fetch_closed_deals_since(token, closed_ids, LEDGER_SINCE_EPOCH_MS)
+    print(f"Staženo uzavřených dealů (Won/Lost od 1.1.2026): {len(closed_deals)}")
+
     deal_ids    = [d.get("id") for d in closed_deals]
     cid_by_deal = hs.get_deal_company_ids(token, deal_ids)
     cnames      = hs.get_company_names(token, list(set(cid_by_deal.values())))
 
-    # Snapshot z otevřených dealů
     snap_rows = []
     for d in open_deals:
         p = d.get("properties") or {}
@@ -95,46 +103,37 @@ def fetch_and_persist(week_label, week_monday):
         try: amt = float(p.get("amount") or 0)
         except ValueError: amt = 0.0
         snap_rows.append({
-            "week_label":    week_label,
-            "week_monday":   week_monday.isoformat(),
-            "deal_id":       d.get("id"),
-            "deal_name":     p.get("dealname", ""),
-            "owner_id":      oid,
-            "owner_name":    owners_map.get(str(oid), "Unassigned"),
-            "stage_id":      sid,
-            "stage_label":   stage_label_map.get(sid, "Unknown stage"),
-            "amount":        amt,
-            "closedate":     p.get("closedate", ""),
-            "pipeline_id":   p.get("pipeline", ""),
-            "is_closed_won": False,
-            "is_closed_lost":False,
+            "week_label": week_label, "week_monday": week_monday.isoformat(),
+            "deal_id": d.get("id"), "deal_name": p.get("dealname", ""),
+            "owner_id": oid, "owner_name": owners_map.get(str(oid), "Unassigned"),
+            "stage_id": sid, "stage_label": stage_label_map.get(sid, "Unknown stage"),
+            "amount": amt, "closedate": p.get("closedate", ""),
+            "pipeline_id": p.get("pipeline", ""), "is_closed_won": False, "is_closed_lost": False,
         })
     store.append_weekly_snapshot(SNAPSHOTS_PATH, week_label, pd.DataFrame(snap_rows))
-    print(f"  Snapshot uložen: {len(snap_rows)} řádků pro {week_label}")
+    print(f"Snapshot uložen: {len(snap_rows)} řádků pro {week_label}")
 
-    # Won/Lost ledger
+    # Ledger se PŘI KAŽDÉM BĚHU přepíše kompletně čerstvými daty z HubSpotu
+    # (žádné historické CSV, žádný upsert podle deal_id - je to plný refresh).
     ledger_rows = []
     for d in closed_deals:
-        p   = d.get("properties") or {}
+        p = d.get("properties") or {}
         sid = p.get("dealstage"); oid = p.get("hubspot_owner_id")
         lbl = stage_label_map.get(sid, "")
         try: amt = float(p.get("amount") or 0)
         except ValueError: amt = 0.0
-        cid    = cid_by_deal.get(str(d.get("id")), "")
+        cid = cid_by_deal.get(str(d.get("id")), "")
         cd_raw = p.get("closedate", "")
         close_wl = metrics.week_label_for_date(cd_raw) if cd_raw else week_label
         ledger_rows.append({
-            "deal_id":      d.get("id"),
-            "deal_name":    p.get("dealname", ""),
-            "company_name": cnames.get(cid, ""),
-            "owner_name":   owners_map.get(str(oid), "Unassigned"),
-            "closedate":    cd_raw,
-            "amount":       amt,
-            "outcome":      "won" if is_closed_won(sid, lbl, closed_won_ids) else "lost",
-            "week_label":   close_wl,
+            "deal_id": d.get("id"), "deal_name": p.get("dealname", ""),
+            "company_name": cnames.get(cid, ""), "owner_name": owners_map.get(str(oid), "Unassigned"),
+            "closedate": cd_raw, "amount": amt,
+            "outcome": "won" if is_closed_won(sid, lbl, closed_won_ids) else "lost",
+            "week_label": close_wl,
         })
-    store.upsert_closed_ledger(LEDGER_PATH, pd.DataFrame(ledger_rows))
-    print(f"  Ledger aktualizován: {len(ledger_rows)} nových/existujících záznamů")
+    pd.DataFrame(ledger_rows, columns=store.LEDGER_COLUMNS).to_csv(LEDGER_PATH, index=False)
+    print(f"Ledger PŘEPSÁN čerstvými daty: {len(ledger_rows)} záznamů")
 
 def build_report(week_monday):
     name_map, goals, display_order, stage_probs, stage_order = load_config()
@@ -163,8 +162,15 @@ def build_report(week_monday):
         except KeyError:
             week_labels_display.append(w)
 
-    eoy      = date(week_monday.year + 1, 1, 1)
-    snap_eoy = snap[pd.to_datetime(snap["closedate"], errors="coerce").dt.date < eoy] if not snap.empty else snap
+    eoy = date(week_monday.year + 1, 1, 1)
+    if not snap.empty:
+        parsed_dates = pd.to_datetime(snap["closedate"], errors="coerce").dt.date
+        # Dealy bez vyplněného closedate NEVYŘAZUJEME - raději je počítat do
+        # "do konce roku" než je tiše ztratit (chybějící closedate je u
+        # otevřených dealů běžné, viz diskuze).
+        snap_eoy = snap[(parsed_dates < eoy) | parsed_dates.isna()]
+    else:
+        snap_eoy = snap
 
     wf  = metrics.stage_weighted_amounts_by_owner(snap,     stage_probs, DEFAULT_PROBABILITY, week_labels, stage_order)
     we  = metrics.stage_weighted_amounts_by_owner(snap_eoy, stage_probs, DEFAULT_PROBABILITY, week_labels, stage_order)

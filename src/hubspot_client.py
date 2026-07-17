@@ -1,3 +1,4 @@
+"""Veškerá komunikace s HubSpot API."""
 import os, time
 from typing import Dict, List, Tuple
 from pathlib import Path
@@ -27,6 +28,8 @@ def _post(url, token, body):
     while True:
         r = requests.post(url, headers=_h(token), json=body)
         if r.status_code == 429 or 500 <= r.status_code < 600: a+=1; _sleep(a); continue
+        if r.status_code >= 400:
+            print("HubSpot API error body:", r.text[:1000])
         r.raise_for_status(); return r.json()
 
 def get_all_owners(token):
@@ -58,15 +61,15 @@ def get_stage_metadata(token):
                 except ValueError: pass
     return label_map, order, won_ids, lost_ids
 
-def fetch_deals(token, cutoff_epoch_ms):
+def _search_deals(token, filters, extra_props=None):
     url = f"{HUBSPOT_BASE}/crm/v3/objects/deals/search"
+    props = ["dealname","dealstage","amount","hubspot_owner_id","closedate","pipeline"]
+    if extra_props: props += extra_props
     body = {
-        "filterGroups": [{"filters": [
-                    {"propertyName": "closedate", "operator": "GTE", "value": 1767225600000},  # 2026-01-01 00:00 UTC
-                    {"propertyName": "closedate", "operator": "LT",  "value": cutoff_epoch_ms}
-                ]}],
-        "properties": ["dealname","dealstage","amount","hubspot_owner_id","closedate","pipeline"],
-        "limit": 100, "sorts": [{"propertyName": "closedate", "direction": "DESCENDING"}],
+        "filterGroups": [{"filters": filters}],
+        "properties": props,
+        "limit": 100,
+        "sorts": [{"propertyName": "hs_lastmodifieddate", "direction": "DESCENDING"}],
     }
     deals = []; after = None
     while True:
@@ -76,12 +79,39 @@ def fetch_deals(token, cutoff_epoch_ms):
         if not after: break
     return deals
 
+def fetch_open_deals(token, closed_stage_ids):
+    """
+    Všechny dealy, které NEJSOU v uzavřené fázi. ZÁMĚRNĚ bez filtru na
+    closedate - otevřené dealy ho často nemají vyplněný, takže filtr na
+    closedate by je vyřadil (to byla příčina 'W28 = samé nuly' bugu).
+    """
+    filters = []
+    if closed_stage_ids:
+        filters.append({"propertyName": "dealstage", "operator": "NOT_IN", "values": list(closed_stage_ids)})
+    if not filters:
+        # Fallback, kdyby se nepodařilo zjistit closed stage id - stáhni vše,
+        # roztřídění na open/closed pak proběhne podle stage labelu v main.py.
+        filters.append({"propertyName": "dealstage", "operator": "HAS_PROPERTY"})
+    return _search_deals(token, filters)
+
+def fetch_closed_deals_since(token, closed_stage_ids, since_epoch_ms):
+    """Won/Lost dealy s closedate >= since_epoch_ms. Uzavřené dealy VŽDY mají
+    closedate vyplněné (je to datum uzavření), takže filtr je tu spolehlivý."""
+    if not closed_stage_ids:
+        return []
+    filters = [
+        {"propertyName": "dealstage", "operator": "IN", "values": list(closed_stage_ids)},
+        {"propertyName": "closedate", "operator": "GTE", "value": since_epoch_ms},
+    ]
+    return _search_deals(token, filters)
+
 def get_deal_company_ids(token, deal_ids):
     if not deal_ids: return {}
     url = f"{HUBSPOT_BASE}/crm/v4/associations/deals/companies/batch/read"
     result = {}
-    for i in range(0, len(deal_ids), 100):
-        chunk = list(dict.fromkeys(deal_ids))[i:i+100]
+    unique_ids = list(dict.fromkeys(deal_ids))
+    for i in range(0, len(unique_ids), 100):
+        chunk = unique_ids[i:i+100]
         data = _post(url, token, {"inputs": [{"id": d} for d in chunk]})
         for r in data.get("results", []):
             fid = str((r.get("from") or {}).get("id")); to = r.get("to") or []
@@ -92,8 +122,9 @@ def get_company_names(token, company_ids):
     if not company_ids: return {}
     url = f"{HUBSPOT_BASE}/crm/v3/objects/companies/batch/read"
     names = {}
-    for i in range(0, len(company_ids), 100):
-        chunk = list(dict.fromkeys(company_ids))[i:i+100]
+    unique_ids = list(dict.fromkeys(company_ids))
+    for i in range(0, len(unique_ids), 100):
+        chunk = unique_ids[i:i+100]
         data = _post(url, token, {"properties": ["name"], "inputs": [{"id": c} for c in chunk]})
         for r in data.get("results", []):
             names[str(r.get("id"))] = (r.get("properties") or {}).get("name", "")

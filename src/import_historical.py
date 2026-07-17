@@ -100,11 +100,15 @@ def main():
     try: token = hs.load_token()
     except RuntimeError: print("  (bez HUBSPOT_TOKEN - company name zůstane prázdný)")
     print("Snapshoty..."); snap = import_snapshots(wb)
-    print("Ledger...");    ledger = import_ledger(wb, token)
+    # Won/Lost se ZÁMĚRNĚ historicky neimportuje - main.py si je při každém
+    # běhu stáhne živě z HubSpotu (closedate >= 1.1.2026), včetně reálného
+    # názvu dealu, což ze starého excelu nejde získat.
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    sp = DATA_DIR/"deals_snapshots.csv"; lp = DATA_DIR/"deals_closed_ledger.csv"
-    snap.to_csv(sp, index=False); ledger.to_csv(lp, index=False)
-    print(f"\nHotovo:\n  {sp} ({len(snap)} řádků)\n  {lp} ({len(ledger)} řádků)")
+    sp = DATA_DIR/"deals_snapshots.csv"
+    snap.to_csv(sp, index=False)
+    print(f"\nHotovo:\n  {sp} ({len(snap)} řádků)")
+    print("  Won/Lost ledger se NEIMPORTOVAL - první živý běh main.py ho kompletně")
+    print("  natáhne z HubSpotu (closedate >= 1.1.2026) s reálnými názvy dealů.")
 
 if __name__ == "__main__":
     main()
