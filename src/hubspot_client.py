@@ -79,19 +79,22 @@ def _search_deals(token, filters, extra_props=None):
         if not after: break
     return deals
 
-def fetch_open_deals(token, closed_stage_ids):
+def fetch_deals_by_closedate_cutoff(token, cutoff_epoch_ms):
     """
-    Všechny dealy, které NEJSOU v uzavřené fázi. ZÁMĚRNĚ bez filtru na
-    closedate - otevřené dealy ho často nemají vyplněný, takže filtr na
-    closedate by je vyřadil (to byla příčina 'W28 = samé nuly' bugu).
+    Přesná replika obou původních skriptů (hubspot_weekly_report_2026.py
+    a hubspot_weekly_report_dynamic_2026.py): stáhne VŠECHNY dealy (bez
+    ohledu na stage - otevřené i uzavřené) s closedate < cutoff. ŽÁDNÝ
+    filtr na stage, žádná spodní hranice - přesně jak to dělaly oba
+    staré skripty.
+
+    Cutoff se volá dvakrát s různou hodnotou:
+      - konec kalendářního roku  -> "Pipeline till end of year" základ
+      - dnešek + 18 měsíců       -> "Rolling 18" základ (superset toho výše)
+    Protože "18 měsíců dopředu" je vždy později než "konec roku", stačí
+    zavolat JEDNOU s širším (18měsíčním) cutoffem a užší množinu odvodit
+    lokálně filtrem na closedate - přesně to dělá main.py.
     """
-    filters = []
-    if closed_stage_ids:
-        filters.append({"propertyName": "dealstage", "operator": "NOT_IN", "values": list(closed_stage_ids)})
-    if not filters:
-        # Fallback, kdyby se nepodařilo zjistit closed stage id - stáhni vše,
-        # roztřídění na open/closed pak proběhne podle stage labelu v main.py.
-        filters.append({"propertyName": "dealstage", "operator": "HAS_PROPERTY"})
+    filters = [{"propertyName": "closedate", "operator": "LT", "value": cutoff_epoch_ms}]
     return _search_deals(token, filters)
 
 def fetch_closed_deals_since(token, closed_stage_ids, since_epoch_ms):

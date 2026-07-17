@@ -4,6 +4,7 @@ import sys
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import pandas as pd, yaml
+from dateutil.relativedelta import relativedelta
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -61,19 +62,29 @@ def fetch_and_persist(week_label, week_monday):
         print("VAROVÁNÍ: HubSpot nevrátil žádné stage s probability 0.0/1.0 - "
               "roztřídění poběží jen podle stage labelu (viz CLOSED_WON_LABELS/CLOSED_LOST_LABELS).")
 
-    # --- Otevřené dealy: BEZ filtru na closedate ---
-    open_deals_raw = hs.fetch_open_deals(token, closed_ids)
-    print(f"Staženo otevřených dealů (raw): {len(open_deals_raw)}")
+    # --- Pipeline snapshot: PŘESNĚ jako oba staré skripty - filtr JEN na
+    # closedate (žádný filtr na stage), s 18měsíčním cutoffem (superset).
+    # "Do konce roku" verze se odvodí lokálně v build_report() filtrem na
+    # closedate < 1.1. příštího roku - je to podmnožina tohoto fetch.
+    week_sunday = week_monday + timedelta(days=6)
+    cutoff_local = datetime.combine(week_sunday, datetime.min.time()).replace(
+        tzinfo=ZoneInfo(LOCAL_TZ)) + relativedelta(months=+18)
+    cutoff_ms = int(cutoff_local.timestamp() * 1000)
+    print(f"Closedate cutoff (18 měsíců dopředu): {cutoff_local.date()}")
 
-    # Pojistka + doplňkové třídění podle labelu, kdyby NOT_IN filtr něco propustil
+    all_deals_by_cutoff = hs.fetch_deals_by_closedate_cutoff(token, cutoff_ms)
+    print(f"Staženo dealů s closedate < cutoff (jakákoliv stage): {len(all_deals_by_cutoff)}")
+
+    # Z toho vyřaď uzavřené (Won/Lost se řeší samostatně níž) - do pipeline
+    # snapshotu patří jen otevřené fáze.
     open_deals = []
-    for d in open_deals_raw:
+    for d in all_deals_by_cutoff:
         p = d.get("properties") or {}
         sid, lbl = p.get("dealstage"), stage_label_map.get(p.get("dealstage"), "")
         if is_closed_won(sid, lbl, closed_won_ids) or is_closed_lost(sid, lbl, closed_lost_ids):
             continue
         open_deals.append(d)
-    print(f"Otevřené dealy po dočištění: {len(open_deals)}")
+    print(f"Z toho otevřených (pro pipeline snapshot): {len(open_deals)}")
 
     from collections import Counter
     stage_counts = Counter(stage_label_map.get((d.get("properties") or {}).get("dealstage"), "?") for d in open_deals)
@@ -81,11 +92,11 @@ def fetch_and_persist(week_label, week_monday):
 
     if not open_deals:
         raise RuntimeError(
-            "BEZPEČNOSTNÍ POJISTKA: HubSpot vrátil 0 otevřených dealů pro tento týden. "
-            "To skoro jistě znamená chybu (špatný token/scope, chybná detekce closed "
-            "stage, nebo firma opravdu nemá žádnou otevřenou pipeline - nepravděpodobné). "
-            "Zastavuji běh, ať se do reportu nezapíšou falešné nuly. Zkontroluj log výše "
-            "(Stage breakdown, Closed Won/Lost stage IDs)."
+            "BEZPEČNOSTNÍ POJISTKA: HubSpot vrátil 0 otevřených dealů s closedate "
+            f"< {cutoff_local.date()}. Buď žádný otevřený deal nemá vyplněné "
+            "closedate (pak je potřeba filtr na closedate z pipeline snapshotu "
+            "odstranit a přehodnotit definici Pipeline till end of year/Rolling 18), "
+            "nebo je chyba jinde - zkontroluj log výše (Stage breakdown)."
         )
 
     # --- Won/Lost: živě z HubSpotu, closedate >= 1.1.2026, VŽDY čerstvé (žádné CSV) ---
@@ -164,7 +175,7 @@ def build_report(week_monday):
 
     eoy = date(week_monday.year + 1, 1, 1)
     if not snap.empty:
-        parsed_dates = pd.to_datetime(snap["closedate"], errors="coerce").dt.date
+        parsed_dates = pd.to_datetime(snap["closedate"], errors="coerce", format="mixed", utc=True).dt.date
         # Dealy bez vyplněného closedate NEVYŘAZUJEME - raději je počítat do
         # "do konce roku" než je tiše ztratit (chybějící closedate je u
         # otevřených dealů běžné, viz diskuze).
