@@ -71,6 +71,8 @@ def import_ledger(wb, token=None):
             cd = ws.cell(r,1).value; amt = ws.cell(r,4).value
             owner = ws.cell(r,5).value; did = ws.cell(r,7).value; cid = ws.cell(r,8).value
             if not did or not owner: continue
+            # Přeskočit řádky před 1.1.2026
+            if not isinstance(cd, datetime) or cd.date() < __import__("datetime").date(2026,1,1): continue
             cd_iso = cd.isoformat() if isinstance(cd,datetime) else ""
             cwl = metrics.week_label_for_date(cd.date()) if isinstance(cd,datetime) else ""
             raw.append({"deal_id":str(did),"deal_name":"","_cid":str(cid) if cid else "",

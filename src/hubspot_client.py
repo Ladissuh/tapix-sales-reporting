@@ -61,7 +61,10 @@ def get_stage_metadata(token):
 def fetch_deals(token, cutoff_epoch_ms):
     url = f"{HUBSPOT_BASE}/crm/v3/objects/deals/search"
     body = {
-        "filterGroups": [{"filters": [{"propertyName": "closedate", "operator": "LT", "value": cutoff_epoch_ms}]}],
+        "filterGroups": [{"filters": [
+                    {"propertyName": "closedate", "operator": "GTE", "value": 1767225600000},  # 2026-01-01 00:00 UTC
+                    {"propertyName": "closedate", "operator": "LT",  "value": cutoff_epoch_ms}
+                ]}],
         "properties": ["dealname","dealstage","amount","hubspot_owner_id","closedate","pipeline"],
         "limit": 100, "sorts": [{"propertyName": "closedate", "direction": "DESCENDING"}],
     }
