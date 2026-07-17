@@ -5,11 +5,15 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.text import RichText
+from openpyxl.chart.legend import Legend
+from openpyxl.chart.marker import Marker
+from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.drawing.line import LineProperties
 from openpyxl.drawing.text import RichTextProperties, Paragraph, ParagraphProperties, CharacterProperties
 from openpyxl.utils import get_column_letter
 
 NAVY="1F2A44"; ACCENT="2E6F9E"; ACCENT_LIGHT="DCE9F2"; GREEN="3D8B58"; RED="B23B3B"; LIGHT_GREY="F4F5F7"
-GOLD="C9A227"; PLUM="6B4C7A"
+GOLD="C9A227"; PLUM="6B4C7A"; GRID="E3E6EA"; MUTED="6B7280"
 FN="Calibri"
 TF=Font(name=FN,size=16,bold=True,color="FFFFFF"); STF=Font(name=FN,size=10,italic=True,color="FFFFFF")
 HF=Font(name=FN,size=10,bold=True,color="FFFFFF"); LF=Font(name=FN,size=10,bold=True,color=NAVY)
@@ -19,34 +23,83 @@ MFill=PatternFill("solid",fgColor=ACCENT_LIGHT); BFill=PatternFill("solid",fgCol
 THIN=Side(style="thin",color="D0D3D8"); BDR=Border(left=THIN,right=THIN,top=THIN,bottom=THIN)
 PCT={"Win rate (kumul.)"}
 STAGE_PALETTE=[ACCENT,GREEN,GOLD,PLUM,RED,"5B8FB0","8FA998","D0A85C","9A7BAD","C77B7B","4C6B8A","7BA88F"]
+MONEY_FMT='#,##0" Kč"'
 
 # ---------------------------------------------------------------------------
-# Pomocné funkce pro grafy (citelnost os, ostre rohy misto oblouck, atd.)
+# Pomocné funkce pro vzhled grafů - čitelnost os, ostré rohy, jednotné barvy,
+# jednotný styl titulků/legendy, bez zbytečného rámování.
 # ---------------------------------------------------------------------------
 
 def _rotate_x_labels(axis, degrees=-45):
-    """Natoci popisky osy X, at je jasne, ke kteremu tydnu/datu sloupec patri."""
+    """Natočí popisky osy X, ať je jasné, ke kterému týdnu/datu sloupec patří."""
     bodyPr = RichTextProperties(rot=int(degrees*60000), vert="horz")
     axis.txPr = RichText(
         bodyPr=bodyPr,
-        p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=900)), endParaRPr=CharacterProperties(sz=900))],
+        p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=900,solidFill=MUTED)),
+                      endParaRPr=CharacterProperties(sz=900,solidFill=MUTED))],
+    )
+
+def _axis_label_style(axis, size=900):
+    axis.txPr = RichText(
+        bodyPr=RichTextProperties(),
+        p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=size,solidFill=MUTED)),
+                      endParaRPr=CharacterProperties(sz=size,solidFill=MUTED))],
     )
 
 def _thin_labels(axis, n_weeks, max_labels=16):
-    """Kdyz je moc tydnu, nezobrazuj uplne kazdy popisek (jinak se sliji)."""
+    """Když je moc týdnů, nezobrazuj úplně každý popisek (jinak se slijou)."""
     if n_weeks > max_labels:
         axis.tickLblSkip = max(1, round(n_weeks / max_labels))
 
-def _sharp_lines(chart):
-    """Vypne vyhlazeni (smoothing) carovych grafu - ostre, ne zaoblene prechody."""
+def _sharp_lines(chart, width_pt=2.25):
+    """Vypne vyhlazení (smoothing) čárových grafů - ostré, ne zaoblené přechody,
+    a ztlustí čáru, ať je na první pohled dobře vidět."""
     for s in chart.series:
         s.smooth = False
+        s.graphicalProperties.line.width = int(width_pt*12700)
 
-def _style_cat_axis(ch, n_weeks):
+def _set_title(ch, text, size=1400, color=NAVY):
+    ch.title = text
+    try:
+        run = ch.title.tx.rich.p[0].r[0]
+        run.rPr = CharacterProperties(sz=size, b=True, solidFill=color, latin=None)
+    except Exception:
+        pass
+
+def _no_border(ch):
+    """Odstraní rámeček kolem celého grafu - čistší, 'plovoucí' vzhled."""
+    ch.graphical_properties = GraphicalProperties(ln=LineProperties(noFill=True))
+
+def _style_value_axis(ch, title=None, fmt=MONEY_FMT):
+    if title: ch.y_axis.title = title
+    ch.y_axis.numFmt = fmt
+    if ch.y_axis.majorGridlines is not None:
+        ch.y_axis.majorGridlines.spPr = GraphicalProperties(ln=LineProperties(solidFill=GRID, w=6350))
+    _axis_label_style(ch.y_axis)
+    ch.y_axis.delete = False
+
+def _style_legend(ch, position="b", size=850):
+    ch.legend = Legend(); ch.legend.position = position; ch.legend.overlay = False
+    ch.legend.txPr = RichText(
+        bodyPr=RichTextProperties(),
+        p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=size,solidFill=MUTED)), endParaRPr=None)],
+    )
+
+def _finish(ch, n_weeks, title, y_title="Kč", legend=True, legend_pos="b"):
+    """Společný závěrečný 'polish' krok - volá se na konci každého grafu."""
+    _set_title(ch, title)
     _rotate_x_labels(ch.x_axis)
     _thin_labels(ch.x_axis, n_weeks)
+    _axis_label_style(ch.x_axis)
     ch.x_axis.delete = False
-    ch.gapWidth = 60
+    ch.gapWidth = 55
+    _style_value_axis(ch, y_title)
+    if legend: _style_legend(ch, legend_pos)
+    else: ch.legend = None
+    _no_border(ch)
+    ch.roundedCorners = False
+    ch.visible_cells_only = False
+    return ch
 
 def _title(ws, title, subtitle, last_col):
     ws.merge_cells(f"A1:{last_col}1"); ws.merge_cells(f"A2:{last_col}2")
@@ -81,11 +134,11 @@ def write_table(ws, start_row, week_labels_display, stage_order, stage_data, met
 
 def write_raw_block(ws, start_row, n_weeks, stage_order, stage_data):
     """
-    Zapise skutecne (nevazene) hodnoty owner x stage x tyden do skrytych
-    radku pod viditelnou tabulkou - slouzi jen jako zdroj dat pro grafy
-    (funnel, vyvoj funnelu v case), aby grafy mohly ukazovat REALNE castky,
-    ne vazene pravdepodobnosti. Radky jsou skryte, uzivatel je v Excelu
-    normalne nevidi.
+    Zapíše skutečné (nevážené) hodnoty owner x stage x týden do skrytých
+    řádků pod viditelnou tabulkou - slouží jen jako zdroj dat pro grafy
+    (funnel, vývoj funnelu v čase), aby grafy mohly ukazovat REÁLNÉ částky,
+    ne vážené pravděpodobností. Řádky jsou skryté, uživatel je v Excelu
+    normálně nevidí.
     """
     r = start_row; stage_rows = {}
     for stage in stage_order:
@@ -103,79 +156,110 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, raw_eoy_rows, raw_full_
     cats = Reference(ws,min_col=2,max_col=mc,min_row=header_row,max_row=header_row)
     last_week_lbl = week_dates_for_title[-1] if week_dates_for_title else ""
 
-    def line(title, labels, y="Kc"):
-        ch=LineChart(); ch.title=title; ch.style=10; ch.y_axis.title=y; ch.height=10; ch.width=26
-        for lbl in labels:
+    def line(title, series_colors, y="Kč"):
+        # series_colors: list of (metric_label, hex_color)
+        ch=LineChart(); ch.height=10.5; ch.width=27
+        for lbl,color in series_colors:
             if lbl not in metric_rows: continue
             d=Reference(ws,min_col=1,max_col=mc,min_row=metric_rows[lbl],max_row=metric_rows[lbl])
             ch.add_data(d,titles_from_data=True,from_rows=True)
-        ch.set_categories(cats); _sharp_lines(ch); _style_cat_axis(ch,n_weeks); ch.visible_cells_only=False; ch.roundedCorners=False
-        return ch
+        ch.set_categories(cats)
+        for s,(lbl,color) in zip(ch.series, [x for x in series_colors if x[0] in metric_rows]):
+            s.graphicalProperties.line.solidFill = color
+            s.marker = Marker(symbol="circle", size=5)
+            s.marker.graphicalProperties = GraphicalProperties(solidFill=color, ln=LineProperties(solidFill=color))
+        _sharp_lines(ch)
+        return _finish(ch, n_weeks, title, y)
 
-    def bar(title, lbl, color=ACCENT, y="Kc"):
-        ch=BarChart(); ch.type="col"; ch.title=title; ch.style=10; ch.y_axis.title=y; ch.height=10; ch.width=26
+    def bar(title, lbl, color=ACCENT, y="Kč"):
+        ch=BarChart(); ch.type="col"; ch.height=10.5; ch.width=27
         d=Reference(ws,min_col=1,max_col=mc,min_row=metric_rows[lbl],max_row=metric_rows[lbl])
         ch.add_data(d,titles_from_data=True,from_rows=True); ch.set_categories(cats)
-        ch.series[0].graphicalProperties.solidFill=color; _style_cat_axis(ch,n_weeks); ch.visible_cells_only=False; ch.roundedCorners=False
-        return ch
+        ch.series[0].graphicalProperties.solidFill=color
+        ch.series[0].graphicalProperties.line.noFill=True
+        return _finish(ch, n_weeks, title, y, legend=False)
 
     def funnel_current():
-        ch=BarChart(); ch.type="bar"
-        sfx=f" ({last_week_lbl})" if last_week_lbl else ""
-        ch.title=f"Funnel - rozpad pipeline, skutecne hodnoty, Rolling 18{sfx}"
-        ch.style=10; ch.x_axis.title="Kc"; ch.height=10; ch.width=26
+        # Aktuální rozpad pipeline (poslední týden) - SKUTEČNÉ (nevážené)
+        # hodnoty, na základě Rolling 18 datasetu (ne "do konce roku").
+        ch=BarChart(); ch.type="bar"; ch.height=10.5; ch.width=27
         lc=1+n_weeks
-        d=Reference(ws,min_col=lc,max_col=lc,min_row=min(raw_full_rows.values()),max_row=max(raw_full_rows.values()))
-        cs=Reference(ws,min_col=1,max_col=1,min_row=min(raw_full_rows.values()),max_row=max(raw_full_rows.values()))
+        min_r, max_r = min(raw_full_rows.values()), max(raw_full_rows.values())
+        d=Reference(ws,min_col=lc,max_col=lc,min_row=min_r,max_row=max_r)
+        cs=Reference(ws,min_col=1,max_col=1,min_row=min_r,max_row=max_r)
         ch.add_data(d,titles_from_data=False); ch.set_categories(cs)
-        ch.series[0].graphicalProperties.solidFill=GREEN; ch.legend=None
-        ch.dataLabels=DataLabelList(); ch.dataLabels.showVal=True; ch.dataLabels.numFmt="#,##0"
-        ch.visible_cells_only=False; ch.roundedCorners=False
+        ch.series[0].graphicalProperties.solidFill=GREEN
+        ch.series[0].graphicalProperties.line.noFill=True
+        ch.dataLabels=DataLabelList(); ch.dataLabels.showVal=True; ch.dataLabels.numFmt='#,##0" Kč"'
+        ch.dataLabels.txPr = RichText(bodyPr=RichTextProperties(),
+            p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=850,b=True,solidFill=NAVY)), endParaRPr=None)])
+        # Fáze na začátku funnelu (Lead Engaged...) nahoru, ne na spodek.
+        ch.y_axis.scaling.orientation = "maxMin"
+        sfx=f" ({last_week_lbl})" if last_week_lbl else ""
+        ch = _finish(ch, n_weeks, f"Funnel – rozpad pipeline, Rolling 18{sfx}", "Kč", legend=False)
+        ch.x_axis.title = None
         return ch
 
     def funnel_evolution(title, rows_dict, color_offset=0):
-        ch=BarChart(); ch.type="col"; ch.grouping="stacked"; ch.overlap=100
-        ch.title=title; ch.style=10; ch.y_axis.title="Kc"; ch.height=10; ch.width=26
+        # Skládaný sloupcový graf: vývoj funnelu (skutečné hodnoty) v čase,
+        # po týdnech, od začátku roku - jedna série na fázi.
+        ch=BarChart(); ch.type="col"; ch.grouping="stacked"; ch.overlap=100; ch.height=11; ch.width=27
         d=Reference(ws,min_col=1,max_col=mc,min_row=min(rows_dict.values()),max_row=max(rows_dict.values()))
         ch.add_data(d,titles_from_data=True,from_rows=True); ch.set_categories(cats)
         for i,s in enumerate(ch.series):
-            s.graphicalProperties.solidFill=STAGE_PALETTE[(i+color_offset)%len(STAGE_PALETTE)]
-        _style_cat_axis(ch,n_weeks); ch.visible_cells_only=False; ch.roundedCorners=False
-        return ch
+            color = STAGE_PALETTE[(i+color_offset)%len(STAGE_PALETTE)]
+            s.graphicalProperties.solidFill = color
+            s.graphicalProperties.line.noFill = True
+        return _finish(ch, n_weeks, title, "Kč", legend=True)
 
     def combo_tempo():
-        bar_ch=BarChart(); bar_ch.type="col"; bar_ch.style=10
+        # Náhrada za "Tempo k cíli" - kombinovaný graf: sloupce = týdenní
+        # změna Rolling 18 (vedlejší osa), čáry = Pipeline do konce roku,
+        # Rolling 18, Won kumulativně (hlavní osa).
+        bar_ch=BarChart(); bar_ch.type="col"
         d=Reference(ws,min_col=1,max_col=mc,min_row=metric_rows["Changes in Rolling 18"],max_row=metric_rows["Changes in Rolling 18"])
         bar_ch.add_data(d,titles_from_data=True,from_rows=True); bar_ch.set_categories(cats)
         bar_ch.series[0].graphicalProperties.solidFill=ACCENT_LIGHT
-        bar_ch.y_axis.axId=200; bar_ch.y_axis.title="Zmena Rolling 18 (Kc)"; bar_ch.y_axis.crosses="max"
+        bar_ch.series[0].graphicalProperties.line.solidFill=ACCENT
+        bar_ch.y_axis.axId=200; bar_ch.y_axis.title="Týdenní změna (Kč)"; bar_ch.y_axis.crosses="max"
+        bar_ch.y_axis.numFmt=MONEY_FMT; _axis_label_style(bar_ch.y_axis)
+        bar_ch.y_axis.majorGridlines=None
 
-        line_ch=LineChart(); line_ch.style=10
-        for lbl,color in [("Pipeline till end of year",GOLD),("Rolling 18",ACCENT),("Won (kumulativně)",GREEN)]:
+        line_ch=LineChart()
+        series_colors=[("Pipeline till end of year",GOLD),("Rolling 18",ACCENT),("Won (kumulativně)",GREEN)]
+        for lbl,color in series_colors:
             if lbl not in metric_rows: continue
             dd=Reference(ws,min_col=1,max_col=mc,min_row=metric_rows[lbl],max_row=metric_rows[lbl])
             line_ch.add_data(dd,titles_from_data=True,from_rows=True)
-        line_ch.set_categories(cats); _sharp_lines(line_ch)
-        line_ch.y_axis.axId=100; line_ch.y_axis.title="Kumulativni hodnota (Kc)"
+        line_ch.set_categories(cats)
+        for s,(lbl,color) in zip(line_ch.series, [x for x in series_colors if x[0] in metric_rows]):
+            s.graphicalProperties.line.solidFill = color
+            s.marker = Marker(symbol="circle", size=5)
+            s.marker.graphicalProperties = GraphicalProperties(solidFill=color, ln=LineProperties(solidFill=color))
+        _sharp_lines(line_ch)
+        line_ch.y_axis.axId=100; line_ch.y_axis.title="Kumulativní hodnota (Kč)"
+        line_ch.y_axis.numFmt=MONEY_FMT; _axis_label_style(line_ch.y_axis)
+        if line_ch.y_axis.majorGridlines is not None:
+            line_ch.y_axis.majorGridlines.spPr = GraphicalProperties(ln=LineProperties(solidFill=GRID, w=6350))
 
         bar_ch += line_ch
-        bar_ch.title="Tempo k cili - pipeline, Rolling 18 a Won v case"
-        bar_ch.height=10; bar_ch.width=26
-        _style_cat_axis(bar_ch,n_weeks); bar_ch.visible_cells_only=False; bar_ch.roundedCorners=False
-        return bar_ch
+        bar_ch.height=10.5; bar_ch.width=27
+        ch = _finish(bar_ch, n_weeks, "Tempo k cíli – pipeline, Rolling 18 a Won v čase", y_title=None, legend=True)
+        ch.y_axis.numFmt=MONEY_FMT
+        return ch
 
     charts=[
-        bar("Tydenni zmena Rolling 18","Changes in Rolling 18"),
-        line("Won vs. Lost (tydne)",["Won","Lost"]),
+        bar("Týdenní změna Rolling 18","Changes in Rolling 18", color=ACCENT),
+        line("Won vs. Lost (týdně)", [("Won",GREEN),("Lost",RED)]),
         funnel_current(),
         combo_tempo(),
-        funnel_evolution("Vyvoj funnelu v case - do konce roku (skutecne hodnoty)", raw_eoy_rows),
-        funnel_evolution("Vyvoj funnelu v case - Rolling 18 (skutecne hodnoty)", raw_full_rows, color_offset=3),
+        funnel_evolution("Vývoj funnelu v čase – do konce roku (skutečné hodnoty)", raw_eoy_rows),
+        funnel_evolution("Vývoj funnelu v čase – Rolling 18 (skutečné hodnoty)", raw_full_rows, color_offset=3),
     ]
     r=anchor_row
     for ch in charts:
         ws.add_chart(ch,f"A{r}")
-        r += 22
+        r += 23
     return r
 
 METRICS_ORDER=["Won","Lost","Pipeline till end of year","Changes in pipeline till end of the year",
@@ -185,8 +269,8 @@ METRICS_ORDER=["Won","Lost","Pipeline till end of year","Changes in pipeline til
 def build_person_sheet(wb, owner, sheet_data, stage_order, week_labels_display, week_dates_for_title):
     ws=wb.create_sheet(owner[:31]); n=len(week_labels_display); lc=get_column_letter(1+n)
     goal=sheet_data.get("annual_goal")
-    goal_txt=f"Rocni cil: {goal:,.0f} Kc".replace(",","_").replace("_"," ") if goal else "Rocni cil: zatim nestanoven"
-    _title(ws,f"{owner} — Sales Pipeline Report",f"Tydenni prehled pipeline, Kc  ·  {goal_txt}",lc)
+    goal_txt=f"Roční cíl: {goal:,.0f} Kč".replace(",","_").replace("_"," ") if goal else "Roční cíl: zatím nestanoven"
+    _title(ws,f"{owner} — Sales Pipeline Report",f"Týdenní přehled pipeline, Kč  ·  {goal_txt}",lc)
     hr,sr,mr,er=write_table(ws,4,week_labels_display,stage_order,sheet_data["stage_weighted"],METRICS_ORDER,sheet_data["metrics"])
     raw_eoy_rows, er2 = write_raw_block(ws, er, n, stage_order, sheet_data.get("raw_eoy", {}))
     raw_full_rows, er3 = write_raw_block(ws, er2, n, stage_order, sheet_data.get("raw_full", {}))
@@ -195,32 +279,35 @@ def build_person_sheet(wb, owner, sheet_data, stage_order, week_labels_display, 
 
 def build_aggregation_sheet(wb, agg_data, stage_order, week_labels_display, week_dates_for_title, leaderboard):
     ws=wb.create_sheet("Aggregation"); n=len(week_labels_display); lc=get_column_letter(1+n)
-    _title(ws,"Tapix — Agregovany Sales Pipeline Report","Vsichni obchodnici souctem, Kc",lc)
+    _title(ws,"Tapix — Agregovaný Sales Pipeline Report","Všichni obchodníci součtem, Kč",lc)
     hr,sr,mr,er=write_table(ws,4,week_labels_display,stage_order,agg_data["stage_weighted"],METRICS_ORDER,agg_data["metrics"])
     raw_eoy_rows, er2 = write_raw_block(ws, er, n, stage_order, agg_data.get("raw_eoy", {}))
     raw_full_rows, er3 = write_raw_block(ws, er2, n, stage_order, agg_data.get("raw_full", {}))
     end=_add_charts(ws,er3+2,hr,mr,raw_eoy_rows,raw_full_rows,n,stage_order,week_dates_for_title)
-    lb=end+2; ws.cell(lb,1,"Zebricek obchodniku (Won celkem)").font=LF; lb+=1
-    ws.cell(lb,1,"Obchodnik").font=HF; ws.cell(lb,1).fill=HFill
-    ws.cell(lb,2,"Won celkem (Kc)").font=HF; ws.cell(lb,2).fill=HFill
+    lb=end+2; ws.cell(lb,1,"Žebříček obchodníků (Won celkem)").font=LF; lb+=1
+    ws.cell(lb,1,"Obchodník").font=HF; ws.cell(lb,1).fill=HFill
+    ws.cell(lb,2,"Won celkem (Kč)").font=HF; ws.cell(lb,2).fill=HFill
     lbh=lb; lb+=1; lbf=lb
     for name,total in leaderboard:
         ws.cell(lb,1,name).font=CF
         c=ws.cell(lb,2,round(total)); c.number_format="#,##0"; c.font=CF; lb+=1
     lbl=max(lb-1,lbf)
-    ch=BarChart(); ch.type="bar"; ch.title="Zebricek obchodniku podle celkoveho Won"; ch.style=10; ch.height=10; ch.width=26
+    ch=BarChart(); ch.type="bar"; ch.height=10.5; ch.width=27
     d=Reference(ws,min_col=2,max_col=2,min_row=lbh,max_row=lbl)
     cs=Reference(ws,min_col=1,max_col=1,min_row=lbf,max_row=lbl)
     ch.add_data(d,titles_from_data=True); ch.set_categories(cs)
-    ch.series[0].graphicalProperties.solidFill=ACCENT; ch.legend=None
-    ch.dataLabels=DataLabelList(); ch.dataLabels.showVal=True; ch.dataLabels.numFmt="#,##0"
+    ch.series[0].graphicalProperties.solidFill=ACCENT
+    ch.series[0].graphicalProperties.line.noFill=True
+    ch.dataLabels=DataLabelList(); ch.dataLabels.showVal=True; ch.dataLabels.numFmt=MONEY_FMT
+    ch.y_axis.scaling.orientation="maxMin"
+    ch = _finish(ch, len(leaderboard) or 1, "Žebříček obchodníků podle celkového Won", "Kč", legend=False)
     ws.add_chart(ch,f"D{lbh}"); ws.freeze_panes="B5"; ws.sheet_view.showGridLines=False
     ws.column_dimensions["A"].width=30
 
 def build_ledger_sheet(wb, title, rows, color):
     ws=wb.create_sheet(title)
-    _title(ws,f"{title} Deals — automaticky ledger","Generovano tydne z HubSpotu","F")
-    headers=["Deal ID","Deal Name","Company","Deal Owner","Close Date","Amount (Kc)","Weeknum"]
+    _title(ws,f"{title} Deals — automatický ledger","Generováno týdně z HubSpotu","F")
+    headers=["Deal ID","Deal Name","Company","Deal Owner","Close Date","Amount (Kč)","Weeknum"]
     r=4
     for ci,h in enumerate(headers):
         c=ws.cell(r,1+ci,h); c.font=HF; c.fill=PatternFill("solid",fgColor=color); c.border=BDR
@@ -238,7 +325,7 @@ def build_raw_debug_sheet(wb, title, raw_by_owner, stage_order, week_labels_disp
     ws = wb.create_sheet(title[:31])
     n = len(week_labels_display)
     last_col = get_column_letter(1 + n)
-    _title(ws, f"DEBUG: {title}", "Docasne - syrova data BEZ vahy, pro porovnani se starym systemem", last_col)
+    _title(ws, f"DEBUG: {title}", "Dočasné - syrová data BEZ váhy, pro porovnání se starým systémem", last_col)
 
     r = 4
     for owner in owners:
