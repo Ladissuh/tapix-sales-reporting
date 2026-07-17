@@ -90,6 +90,24 @@ def fetch_and_persist(week_label, week_monday):
     stage_counts = Counter(stage_label_map.get((d.get("properties") or {}).get("dealstage"), "?") for d in open_deals)
     print(f"Stage breakdown otevřených dealů: {dict(stage_counts)}")
 
+    # --- DIAGNOSTIKA: porovnání s dealy bez closedate filtru ---
+    # Ukáže přesně, které dealy vypadly kvůli chybějícímu/vzdálenému closedate.
+    all_open_no_filter = hs.fetch_all_open_deals_no_date_filter(token, closed_ids)
+    open_ids_in_snapshot = {d.get("id") for d in open_deals}
+    missing_from_snapshot = [d for d in all_open_no_filter if d.get("id") not in open_ids_in_snapshot]
+    print(f"DIAGNOSTIKA: otevřených dealů celkem v HubSpotu (bez closedate filtru): {len(all_open_no_filter)}")
+    print(f"DIAGNOSTIKA: z toho VYŘAZENO closedate filtrem: {len(missing_from_snapshot)}")
+    if missing_from_snapshot:
+        print("DIAGNOSTIKA: konkrétní vyřazené dealy (deal_id | název | owner | stage | closedate):")
+        for d in missing_from_snapshot[:30]:
+            p = d.get("properties") or {}
+            sid = p.get("dealstage")
+            print(f"  {d.get('id')} | {p.get('dealname','')} | "
+                  f"{owners_map.get(str(p.get('hubspot_owner_id')),'?')} | "
+                  f"{stage_label_map.get(sid,'?')} | closedate={p.get('closedate') or '(PRÁZDNÉ)'}")
+        if len(missing_from_snapshot) > 30:
+            print(f"  ... a dalších {len(missing_from_snapshot) - 30}")
+
     if not open_deals:
         raise RuntimeError(
             "BEZPEČNOSTNÍ POJISTKA: HubSpot vrátil 0 otevřených dealů s closedate "

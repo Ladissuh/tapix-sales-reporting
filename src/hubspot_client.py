@@ -45,6 +45,18 @@ def get_all_owners(token):
     return out
 
 def get_stage_metadata(token):
+    """
+    Vrací:
+      label_map: stage_id -> label
+      order:     pořadí labelů dle první pipeline
+      won_ids:   stage_id, kde metadata.isClosed=='true' A probability>=0.5
+      lost_ids:  stage_id, kde metadata.isClosed=='true' A probability<0.5
+
+    DŮLEŽITÉ: uzavřenost fáze se pozná podle 'isClosed', NE podle probability.
+    Otevřené fáze mohou mít probability 0% (např. 'Not Now'/'Awaiting
+    confirmation') nebo blízko 100%, aniž by byly ve skutečnosti uzavřené -
+    probability samo o sobě NENÍ spolehlivý signál uzavřenosti.
+    """
     data = _get(f"{HUBSPOT_BASE}/crm/v3/pipelines/deals", token)
     label_map, order, won_ids, lost_ids = {}, [], set(), set()
     for pipe in data.get("results", []):
@@ -52,13 +64,17 @@ def get_stage_metadata(token):
         if not order: order = [s.get("label", s.get("id")) for s in stages]
         for s in stages:
             sid = s.get("id"); label_map[sid] = s.get("label", sid)
-            p = (s.get("metadata") or {}).get("probability")
-            if p is not None:
-                try:
-                    pf = float(p)
-                    if pf >= 0.999: won_ids.add(sid)
-                    elif pf <= 0.001: lost_ids.add(sid)
-                except ValueError: pass
+            meta = s.get("metadata") or {}
+            is_closed = str(meta.get("isClosed", "")).strip().lower() == "true"
+            if not is_closed:
+                continue
+            prob = meta.get("probability")
+            try:
+                pf = float(prob) if prob is not None else 0.0
+            except ValueError:
+                pf = 0.0
+            if pf >= 0.5: won_ids.add(sid)
+            else: lost_ids.add(sid)
     return label_map, order, won_ids, lost_ids
 
 def _search_deals(token, filters, extra_props=None):
@@ -96,6 +112,18 @@ def fetch_deals_by_closedate_cutoff(token, cutoff_epoch_ms):
     """
     filters = [{"propertyName": "closedate", "operator": "LT", "value": cutoff_epoch_ms}]
     return _search_deals(token, filters)
+
+def fetch_all_open_deals_no_date_filter(token, closed_stage_ids):
+    """
+    DIAGNOSTICKÁ funkce (jen pro log, nepoužívá se pro report). Stáhne
+    VŠECHNY aktuálně otevřené dealy BEZ ohledu na closedate. Porovnáním
+    s fetch_deals_by_closedate_cutoff() se pozná, kolik dealů vypadává
+    kvůli chybějícímu/vzdálenému closedate.
+    """
+    filters = []
+    if closed_stage_ids:
+        filters.append({"propertyName": "dealstage", "operator": "NOT_IN", "values": list(closed_stage_ids)})
+    return _search_deals(token, filters) if filters else []
 
 def fetch_closed_deals_since(token, closed_stage_ids, since_epoch_ms):
     """Won/Lost dealy s closedate >= since_epoch_ms. Uzavřené dealy VŽDY mají
