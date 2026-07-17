@@ -256,9 +256,12 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
             p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=850,b=True,solidFill=NAVY)), endParaRPr=None)])
         # First pipeline stage (Lead Engaged...) on top, not at the bottom.
         ch.x_axis.scaling.orientation = "maxMin"
-        # Keep the value axis normal (0 on the left, ascending to the right).
+        # Keep the value axis normal (0 on the left, ascending to the right)
+        # and pinned to the BOTTOM - reversing the category axis above would
+        # otherwise flip it up to the top by default.
         ch.y_axis.scaling.orientation = "minMax"
         ch.y_axis.crosses = "min"
+        ch.y_axis.axPos = "b"
         sfx=f" ({last_week_lbl})" if last_week_lbl else ""
         ch = _finish(ch, n_weeks, f"Funnel – pipeline breakdown, Rolling 18{sfx}", "Kč", legend=False)
         ch.x_axis.title = None
@@ -331,19 +334,29 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
         ch.y_axis.numFmt=MONEY_FMT
         return ch
 
-    charts=[
-        bar("Weekly change in Rolling 18","Changes in Rolling 18", color=ACCENT),
-        stacked_won_lost(),
-        funnel_current(),
-        combo_tempo(),
-        funnel_evolution("Funnel evolution over time – till end of year (weighted values)", weighted_eoy_rows),
-        funnel_evolution("Funnel evolution over time – Rolling 18 (weighted values)", weighted_full_rows, color_offset=3),
-    ]
-    r=anchor_row
-    for ch in charts:
-        if ch is None: continue
-        ws.add_chart(ch,f"A{r}")
-        r += 23
+    chart1 = bar("Weekly change in Rolling 18","Changes in Rolling 18", color=ACCENT)
+    chart2 = stacked_won_lost()
+    chart3 = funnel_current()
+    chart4 = combo_tempo()
+    chart5 = funnel_evolution("Funnel evolution over time – till end of year (weighted values)", weighted_eoy_rows)
+    chart6 = funnel_evolution("Funnel evolution over time – Rolling 18 (weighted values)", weighted_full_rows)
+
+    # Layout: chart4 sits to the right of chart1, chart5 to the right of
+    # chart2, chart6 to the right of chart3 - two side-by-side columns
+    # instead of one long stack. RIGHT_COL is far enough right (~30cm) that
+    # it never overlaps the ~27cm-wide left-column charts.
+    RIGHT_COL = "S"
+    r = anchor_row
+    ws.add_chart(chart1, f"A{r}")
+    if chart4 is not None:
+        ws.add_chart(chart4, f"{RIGHT_COL}{r}")
+    r += 30  # chart4 (15cm tall) needs more vertical room than chart1
+    ws.add_chart(chart2, f"A{r}")
+    ws.add_chart(chart5, f"{RIGHT_COL}{r}")
+    r += 23
+    ws.add_chart(chart3, f"A{r}")
+    ws.add_chart(chart6, f"{RIGHT_COL}{r}")
+    r += 23
     return r
 
 METRICS_ORDER=["Won","Lost","Pipeline till end of year","Changes in pipeline till end of the year",
