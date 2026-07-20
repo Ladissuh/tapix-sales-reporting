@@ -217,7 +217,10 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
         ch.add_data(d,titles_from_data=True,from_rows=True); ch.set_categories(cats)
         ch.series[0].graphicalProperties.solidFill=color
         ch.series[0].graphicalProperties.line.noFill=True
-        return _finish(ch, n_weeks, title, y, legend=False)
+        ch = _finish(ch, n_weeks, title, y, legend=False)
+        ch.y_axis.title = None
+        _hide_axis_labels(ch.y_axis)
+        return ch
 
     def stacked_won_lost():
         # Cumulative (stacked) Won vs. Lost - better conveys the overall
@@ -231,7 +234,10 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
         for s,color in zip(ch.series, [GREEN,RED]):
             s.graphicalProperties.solidFill = color
             s.graphicalProperties.line.noFill = True
-        return _finish(ch, n_weeks, "Won vs. Lost (cumulative)", "Kč", legend=True)
+        ch = _finish(ch, n_weeks, "Won vs. Lost (cumulative)", "Kč", legend=True)
+        ch.y_axis.title = None
+        _hide_axis_labels(ch.y_axis)
+        return ch
 
     def funnel_current():
         # Current pipeline breakdown (latest week) - ACTUAL (unweighted)
@@ -265,9 +271,12 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
         sfx=f" ({last_week_lbl})" if last_week_lbl else ""
         ch = _finish(ch, n_weeks, f"Funnel – pipeline breakdown, Rolling 18{sfx}", "Kč", legend=False)
         ch.x_axis.title = None
-        # Data labels on each bar already carry the stage name - hide the
-        # separate axis tick labels to avoid duplicate/rotated clutter.
+        # Data labels on each bar already carry the stage name and amount -
+        # hide the separate axis tick labels/titles on both axes to avoid
+        # duplicate clutter.
         _hide_axis_labels(ch.x_axis)
+        ch.y_axis.title = None
+        _hide_axis_labels(ch.y_axis)
         return ch
 
     def funnel_evolution(title, rows_dict, color_offset=0):
