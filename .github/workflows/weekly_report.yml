@@ -2,39 +2,48 @@ name: Weekly Sales Report
 
 on:
   schedule:
-    # Pondělí 6:00 CET/CEST => 5:00 UTC (v létě), 4:00 v zimě.
-    # GitHub Actions cron je vždy v UTC - 5:00 UTC pokrývá obě varianty
-    # rozumně (v zimě to bude v 6:00 místního času, v létě v 7:00).
     - cron: "0 5 * * 1"
-  workflow_dispatch: {}   # umožňuje ruční spuštění tlačítkem v záložce Actions
+  workflow_dispatch: {}
 
 permissions:
-  contents: write   # potřeba, aby workflow mohl commitnout nová data zpět
+  contents: write
 
 jobs:
   build-report:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repozitáře
-        uses: actions/checkout@v4
-
-      - name: Nastavit Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Nainstalovat závislosti
-        run: pip install -r requirements.txt
-
-      - name: Spustit generátor reportu
+      - run: pip install -r requirements.txt
+      - name: Run the report generator
         env:
           HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
         run: python src/main.py
 
-      - name: Commitnout aktualizovaná data a report
+      # Only the historical CSV data lives in git (next week's run needs
+      # it). The Excel report itself no longer gets committed - it's
+      # published as a Release asset below instead, so the repo doesn't
+      # accumulate a binary diff every week.
+      - name: Commit updated history
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/ outputs/
-          git diff --quiet --cached || git commit -m "Weekly sales report update"
+          git add data/
+          git diff --quiet --cached || git commit -m "Weekly snapshot update"
           git push
+
+      - name: Compute release tag
+        id: tag
+        run: echo "value=report-$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish report as a GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.value }}
+          name: "Sales Report – ${{ steps.tag.outputs.value }}"
+          make_latest: true
+          files: outputs/Sales_Reporting_*.xlsx
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
