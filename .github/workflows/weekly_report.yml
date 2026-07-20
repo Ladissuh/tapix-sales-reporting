@@ -21,29 +21,10 @@ jobs:
         env:
           HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
         run: python src/main.py
-
-      # Only the historical CSV data lives in git (next week's run needs
-      # it). The Excel report itself no longer gets committed - it's
-      # published as a Release asset below instead, so the repo doesn't
-      # accumulate a binary diff every week.
-      - name: Commit updated history
+      - name: Commit outputs
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/
-          git diff --quiet --cached || git commit -m "Weekly snapshot update"
+          git add data/ outputs/
+          git diff --quiet --cached || git commit -m "Weekly sales report update"
           git push
-
-      - name: Compute release tag
-        id: tag
-        run: echo "value=report-$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
-
-      - name: Publish report as a GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.value }}
-          name: "Sales Report – ${{ steps.tag.outputs.value }}"
-          make_latest: true
-          files: outputs/Sales_Reporting_*.xlsx
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
