@@ -202,6 +202,34 @@ def fetch_and_persist(week_label, week_monday):
             "amount": amt, "closedate": p.get("closedate", ""),
             "pipeline_id": p.get("pipeline", ""), "is_closed_won": False, "is_closed_lost": False,
         })
+
+    # --- BEZPEČNOSTNÍ POJISTKA #2 ---
+    # "0 otevřených dealů" už dřív hlídáme, ale reálný incident ukázal, že
+    # HubSpot API může vrátit i PARTIAL výsledek (např. přeruší se
+    # paginace uprostřed) - tj. NĒNULOVÝ, ale výrazně nekompletní počet
+    # dealů/objem. Takový týden se dřív tiše zapsal a "rozbil" historii
+    # (viz report z 12.07. - většina stage spadla na 0). Porovnáme proto
+    # celkový objem nového snapshotu s posledním existujícím týdnem a při
+    # podezřelém propadu zápis odmítneme, ať se raději workflow spustí
+    # znovu (idempotentní), než aby se poškozená data uložila navždy.
+    new_total = sum(r["amount"] for r in snap_rows)
+    existing_all = store.load_or_empty(SNAPSHOTS_PATH, store.SNAPSHOTS_COLUMNS)
+    if not existing_all.empty:
+        prev_weeks = sorted(existing_all["week_monday"].unique())
+        prev_week = [w for w in prev_weeks if w != week_monday.isoformat()]
+        if prev_week:
+            last_week_monday = prev_week[-1]
+            last_total = existing_all.loc[existing_all["week_monday"] == last_week_monday, "amount"].sum()
+            if last_total > 0 and new_total < 0.3 * last_total:
+                raise RuntimeError(
+                    f"BEZPEČNOSTNÍ POJISTKA: nový snapshot pro {week_label} má celkový "
+                    f"objem {new_total:,.0f} Kč, což je pod 30 % minulého týdne "
+                    f"({last_total:,.0f} Kč). Vypadá to na nekompletní/přerušený fetch "
+                    "z HubSpotu (např. paginace se zasekla v půli), ne na skutečnou "
+                    "změnu pipeline. Zápis byl ZASTAVEN, ať se historie neposkvrní - "
+                    "spusť workflow znovu (přepíše týden čerstvým, doufejme kompletním, fetchem)."
+                )
+
     store.append_weekly_snapshot(SNAPSHOTS_PATH, week_label, pd.DataFrame(snap_rows))
     print(f"Snapshot uložen: {len(snap_rows)} řádků pro {week_label}")
 
