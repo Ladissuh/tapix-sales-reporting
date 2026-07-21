@@ -8,6 +8,7 @@ from openpyxl.chart.text import RichText
 from openpyxl.chart.legend import Legend
 from openpyxl.chart.marker import Marker
 from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.chart.layout import Layout, ManualLayout
 from openpyxl.drawing.line import LineProperties
 from openpyxl.drawing.text import RichTextProperties, Paragraph, ParagraphProperties, CharacterProperties
 from openpyxl.utils import get_column_letter
@@ -90,6 +91,24 @@ def _style_legend(ch, position="b", size=850):
         p=[Paragraph(pPr=ParagraphProperties(defRPr=CharacterProperties(sz=size,solidFill=MUTED)), endParaRPr=None)],
     )
 
+def _reserve_top_margin(ch, top=0.18, bottom_margin=0.06, side_margin=0.02):
+    """
+    Ručně vyhradí místo NAD plot area (pro titulek) a malé okraje po
+    stranách/zdola - bez tohoto explicitního layoutu si to některé
+    prohlížeče/verze Excelu spočítají špatně a popisky (zvlášť u funnelu,
+    kde jsou dlouhé a mají vlastní data labels) se pak překrývají s
+    titulkem grafu.
+
+    Pozor: nastavuje se na ch.layout (ne ch.plot_area.layout) - openpyxl
+    při ukládání přepíše plot_area.layout hodnotou z chart.layout, takže
+    nastavení na plot_area by se tiše ztratilo.
+    """
+    ch.layout = Layout(manualLayout=ManualLayout(
+        xMode="edge", yMode="edge",
+        x=side_margin, y=top,
+        w=1 - 2 * side_margin, h=1 - top - bottom_margin,
+    ))
+
 def _finish(ch, n_weeks, title, y_title="Kč", legend=True, legend_pos="b", rotate_x=-45, thin_x=True):
     """Shared final 'polish' step - called at the end of every chart."""
     _set_title(ch, title)
@@ -103,6 +122,7 @@ def _finish(ch, n_weeks, title, y_title="Kč", legend=True, legend_pos="b", rota
     _no_border(ch)
     ch.roundedCorners = False
     ch.visible_cells_only = False
+    _reserve_top_margin(ch)
     return ch
 
 def _title(ws, title, subtitle, last_col):
@@ -277,6 +297,9 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
         _hide_axis_labels(ch.x_axis)
         ch.y_axis.title = None
         _hide_axis_labels(ch.y_axis)
+        # Data labels here can wrap to two lines (long stage names) - give
+        # a bit more breathing room below the title than the shared default.
+        _reserve_top_margin(ch, top=0.22)
         return ch
 
     def funnel_evolution(title, rows_dict, color_offset=0):
@@ -352,18 +375,21 @@ def _add_charts(ws, anchor_row, header_row, metric_rows, weighted_eoy_rows, raw_
 
     # Layout: chart4 sits to the right of chart1, chart5 to the right of
     # chart2, chart6 to the right of chart3 - two side-by-side columns
-    # instead of one long stack. RIGHT_COL is far enough right (~30cm) that
-    # it never overlaps the ~27cm-wide left-column charts.
+    # instead of one long stack. LEFT_COL is nudged right of column A (away
+    # from the narrow label column edge). RIGHT_COL is far enough right
+    # (~49cm) that it never overlaps the ~27cm-wide left-column charts even
+    # after that nudge.
+    LEFT_COL = "C"
     RIGHT_COL = "S"
     r = anchor_row
-    ws.add_chart(chart1, f"A{r}")
+    ws.add_chart(chart1, f"{LEFT_COL}{r}")
     if chart4 is not None:
         ws.add_chart(chart4, f"{RIGHT_COL}{r}")
     r += 30  # chart4 (15cm tall) needs more vertical room than chart1
-    ws.add_chart(chart2, f"A{r}")
+    ws.add_chart(chart2, f"{LEFT_COL}{r}")
     ws.add_chart(chart5, f"{RIGHT_COL}{r}")
     r += 23
-    ws.add_chart(chart3, f"A{r}")
+    ws.add_chart(chart3, f"{LEFT_COL}{r}")
     ws.add_chart(chart6, f"{RIGHT_COL}{r}")
     r += 23
     return r
