@@ -16,21 +16,36 @@ def load_token():
 def _h(token): return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 def _sleep(a): time.sleep(min(2**a, 32))
 
-def _get(url, token, params=None):
-    a = 0
-    while True:
-        r = requests.get(url, headers=_h(token), params=params)
-        if r.status_code == 429 or 500 <= r.status_code < 600: a+=1; _sleep(a); continue
-        r.raise_for_status(); return r.json()
+MAX_ATTEMPTS = 6        # 1 pokus + 5 opakování (čekání 2, 4, 8, 16, 32 s)
+REQUEST_TIMEOUT = 60    # s - bez timeoutu může request viset donekonečna
 
-def _post(url, token, body):
-    a = 0
-    while True:
-        r = requests.post(url, headers=_h(token), json=body)
-        if r.status_code == 429 or 500 <= r.status_code < 600: a+=1; _sleep(a); continue
+def _request(method, url, token, **kw):
+    """
+    Společný HTTP wrapper s retry. Opakuje nejen 429/5xx (jako dřív), ale
+    i síťové chyby - ConnectionResetError při TLS handshaku, timeouty apod.
+    Přesně na tom spadl běh 14.09. (W37). Počet pokusů je omezený, ať se
+    workflow při delším výpadku HubSpotu nezacyklí.
+    """
+    for a in range(1, MAX_ATTEMPTS + 1):
+        try:
+            r = requests.request(method, url, headers=_h(token), timeout=REQUEST_TIMEOUT, **kw)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            if a == MAX_ATTEMPTS: raise
+            print(f"Síťová chyba ({type(e).__name__}), pokus {a}/{MAX_ATTEMPTS}, zkouším znovu...")
+            _sleep(a); continue
+        if r.status_code == 429 or 500 <= r.status_code < 600:
+            if a == MAX_ATTEMPTS: r.raise_for_status()
+            print(f"HubSpot vrátil {r.status_code}, pokus {a}/{MAX_ATTEMPTS}, zkouším znovu...")
+            _sleep(a); continue
         if r.status_code >= 400:
             print("HubSpot API error body:", r.text[:1000])
         r.raise_for_status(); return r.json()
+
+def _get(url, token, params=None):
+    return _request("GET", url, token, params=params)
+
+def _post(url, token, body):
+    return _request("POST", url, token, json=body)
 
 def get_all_owners(token):
     out = {}; params = {"limit": 100, "archived": "false"}
